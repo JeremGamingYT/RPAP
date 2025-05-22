@@ -286,7 +286,7 @@ public class RealisticFuelSystem : Script
     private readonly Keys useJerryCanKey = Keys.E;
     private bool isRefuelingWithJerryCan = false;
     private Vehicle? currentJerryCanRefuelVehicle = null;
-    private readonly float jerryCanRefillRate = 1.0f; // Litres per second, adjust as needed
+    private readonly float jerryCanRefillRate = 2.0f; // Litres per second
     
     // Add variables for jerrycan UI and dropped jerrycan
     private bool showJerryCanUI = false;
@@ -597,6 +597,17 @@ public class RealisticFuelSystem : Script
 
                 if (isKeyPressed)
                 {
+                    if (currentJerryCanRefuelVehicle == null || !currentJerryCanRefuelVehicle.Exists())
+                    {
+                        isRefuelingWithJerryCan = false;
+                        // Optionally, add a Notification.PostTicker here for debugging if this unexpected state is hit.
+                        // E.g., Notification.PostTicker("~r~Error: currentJerryCanRefuelVehicle became null unexpectedly.", true);
+                        if (Game.Player.Character != null && Game.Player.Character.Exists())
+                        {
+                            Game.Player.Character.Task.ClearAll(); // Stop animation if player exists
+                        }
+                        return; // Exit this part of OnTick logic
+                    }
                     int vehicleID = currentJerryCanRefuelVehicle.Handle;
                     if (!vehicleFuelLevels.ContainsKey(vehicleID))
                     {
@@ -608,9 +619,14 @@ public class RealisticFuelSystem : Script
                     // Check if JerryCan has fuel and vehicle needs fuel
                     if (jerryCanFuel > 0 && currentFuel < capacity)
                     {
-                        float deltaTime = (Interval == 0 ? consumptionUpdateInterval / 1000.0f : Interval / 1000.0f);
-                        float fuelToAdd = Math.Min(jerryCanRefillRate * deltaTime, capacity - currentFuel);
-                        fuelToAdd = Math.Min(fuelToAdd, jerryCanFuel); // Don't add more than jerryCan has
+                        // float deltaTime = (Interval == 0 ? consumptionUpdateInterval / 1000.0f : Interval / 1000.0f); // Old calculation
+                        // float fuelToAdd = Math.Min(jerryCanRefillRate * deltaTime, capacity - currentFuel); // Old calculation
+                        // fuelToAdd = Math.Min(fuelToAdd, jerryCanFuel); // Don't add more than jerryCan has // Old calculation
+
+                        float fuelToAdd = jerryCanRefillRate * Game.LastFrameTime;
+                        float neededByVehicle = capacity - currentFuel;
+                        fuelToAdd = Math.Min(fuelToAdd, neededByVehicle);
+                        fuelToAdd = Math.Min(fuelToAdd, jerryCanFuel);
 
                         vehicleFuelLevels[vehicleID] += fuelToAdd;
                         jerryCanFuel -= fuelToAdd;
