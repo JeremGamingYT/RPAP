@@ -1514,12 +1514,19 @@ public class RealisticFuelSystem : Script
             return;
         }
 
-        float groundZ;
-        // GET_GROUND_Z_FOR_3D_COORD uses 'bool getGroundZ(float x, float y, float z, out float groundZ, bool unk)'
-        // The last parameter 'unk' is usually false for scripts.
-        // Correcting the call to ensure proper syntax for GET_GROUND_Z_FOR_3D_COORD
-        bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
+        // float groundZ; // Old declaration for Function.Call
+        // // GET_GROUND_Z_FOR_3D_COORD uses 'bool getGroundZ(float x, float y, float z, out float groundZ, bool unk)'
+        // // The last parameter 'unk' is usually false for scripts.
+        // // Correcting the call to ensure proper syntax for GET_GROUND_Z_FOR_3D_COORD
+        // bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
         
+        Vector3 posForGroundCheck = new Vector3(dropPosition.X, dropPosition.Y, dropPosition.Z);
+        float groundZ = World.GetGroundHeight(posForGroundCheck);
+        bool groundFound = (groundZ != 0.0f); // Basic check; World.GetGroundHeight returns 0 if not found.
+                                             // A more robust check might be Math.Abs(groundZ - dropPosition.Z) < someThreshold if dropPosition.Z is expected to be near ground.
+                                             // Or simply if groundZ is not some obviously invalid value if the area can have 0.0f as actual ground.
+                                             // For now, groundZ != 0.0f is a common way to check if a ground height was returned.
+
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
         // Créer l'objet jerrycan au sol
