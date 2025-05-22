@@ -1,0 +1,63 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Users\\letil\\Documents\\CursorProjects\\RPAP\\REALIS.csproj": {}
+  },
+  "projects": {
+    "C:\\Users\\letil\\Documents\\CursorProjects\\RPAP\\REALIS.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Users\\letil\\Documents\\CursorProjects\\RPAP\\REALIS.csproj",
+        "projectName": "REALIS",
+        "projectPath": "C:\\Users\\letil\\Documents\\CursorProjects\\RPAP\\REALIS.csproj",
+        "packagesPath": "C:\\Users\\letil\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\letil\\Documents\\CursorProjects\\RPAP\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\letil\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )",
+              "autoReferenced": true
+            },
+            "Microsoft.NETFramework.ReferenceAssemblies.net48": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.409\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

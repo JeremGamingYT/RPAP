@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Choisis l'un OU l'autre des blocs ci-dessous -->
+    
+    <!-- Variante A : modernise -->
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    
+    <!-- Variante B : old-school (décommente si tu préfères) -->
+    <!-- <Nullable>disable</Nullable> -->
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    
+    <!-- Référence vers SHVDN3 -->
+    <Reference Include="ScriptHookVDotNet3">
+      <HintPath>C:\Program Files\Epic Games\GTAV\ScriptHookVDotNet3.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Pack de références si tu n'as pas le Dev Pack -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48"
+                      Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
