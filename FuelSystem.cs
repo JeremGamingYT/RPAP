@@ -1491,36 +1491,53 @@ public class RealisticFuelSystem : Script
     // Méthode pour gérer quand le jerrycan devient vide
     private void HandleEmptyJerryCanProcedure(Ped playerPed)
     {
+        if (playerPed == null || !playerPed.Exists())
+            return;
+
         Notification.PostTicker("~y~Votre jerrycan est maintenant vide.", true);
 
         // Retirer l'arme jerrycan
         Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, (int)WeaponHash.PetrolCan);
-        // It seems there were other hashes for PetrolCan in the original code, let's include them for safety.
-        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 883325847); 
-        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 1168162263);
+        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 883325847); // Legacy hash, ensure removal
+        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 1168162263); // Legacy hash, ensure removal
 
-
-        // Faire tomber le jerrycan au sol (créer un prop)
         Vector3 dropPosition = playerPed.Position;
-        jerryCanDropped = true;
-        droppedJerryCanPosition = dropPosition;
-        jerryCanDisappearTimer = 0;
+
+        int modelHash = Function.Call<int>(Hash.GET_HASH_KEY, "prop_jerrycan_01a");
+        if (modelHash == 0)
+        {
+            Notification.PostTicker("~r~Erreur: Modèle du jerrycan introuvable.", true); // Log error
+            // Set states anyway to prevent repeated attempts if possible
+            hasJerryCan = false; 
+            showJerryCanUI = false;
+            isRefuelingWithJerryCan = false; // Ensure to stop any refueling state
+            return;
+        }
+
+        float groundZ;
+        // GET_GROUND_Z_FOR_3D_COORD uses 'bool getGroundZ(float x, float y, float z, out float groundZ, bool unk)'
+        // The last parameter 'unk' is usually false for scripts.
+        bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
+        
+        float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
         // Créer l'objet jerrycan au sol
         int jerryCanProp = Function.Call<int>(Hash.CREATE_OBJECT,
-            Function.Call<int>(Hash.GET_HASH_KEY, "prop_jerrycan_01a"),
-            dropPosition.X, dropPosition.Y, dropPosition.Z - 1.0f, // Adjust Z to be on ground
-            true, true, false);
+            modelHash, // Use the checked modelHash
+            dropPosition.X, dropPosition.Y, spawnZ,
+            true, true, false); // isNetwork = true, thisScriptCheck = true (missionEntity)
 
-        // Marquer comme non ramassable et dynamique
         if (jerryCanProp != 0)
         {
             Function.Call(Hash.SET_ENTITY_COLLISION, jerryCanProp, true, true);
             Function.Call(Hash.SET_ENTITY_DYNAMIC, jerryCanProp, true);
-            // Optional: Apply some physics so it falls naturally
-            Function.Call(Hash.APPLY_FORCE_TO_ENTITY, jerryCanProp, 1, 0.0f, 0.0f, -0.5f, 0.0f, 0.0f, 0.0f, 0, true, true, true, true, true);
-
+            // APPLY_FORCE_TO_ENTITY was here, it has been removed to allow natural settling.
         }
+
+        jerryCanDropped = true;
+        // Update droppedJerryCanPosition to the actual spawn coordinates for accurate despawn
+        droppedJerryCanPosition = new Vector3(dropPosition.X, dropPosition.Y, spawnZ); 
+        jerryCanDisappearTimer = 0;
 
         hasJerryCan = false; // Player no longer "has" a usable jerrycan (it's empty and dropped)
         showJerryCanUI = false; // No UI if no usable jerrycan
