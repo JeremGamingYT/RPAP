@@ -580,7 +580,7 @@ public class RealisticFuelSystem : Script
         // Gérer le ravitaillement avec jerrycan en cours
         if (isRefuelingWithJerryCan && currentJerryCanRefuelVehicle != null && currentJerryCanRefuelVehicle.Exists())
         {
-            Ped playerPed = Game.Player.Character;
+            // Ped playerPed = Game.Player.Character; // CS0136 Error: Already defined in this scope (at the start of OnTick)
 
             // Distance Check
             if (playerPed.Position.DistanceTo(currentJerryCanRefuelVehicle.Position) > 5.0f)
