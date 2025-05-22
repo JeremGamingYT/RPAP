@@ -5,5 +5,6 @@ C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.GeneratedMSB
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.AssemblyInfoInputs.cache
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.AssemblyInfo.cs
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.csproj.CoreCompileInputs.cache
+C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.sourcelink.json
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.dll
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.pdb

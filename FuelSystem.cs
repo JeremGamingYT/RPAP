@@ -291,7 +291,7 @@ public class RealisticFuelSystem : Script
     public RealisticFuelSystem()
     {
         // Intervalle de mise à jour (en ms)
-        Interval = 1000;
+        Interval = 0;
         
         // Chemin de sauvegarde dans le dossier SHVDN
         string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ScriptHookVDotNet");
