@@ -1521,11 +1521,13 @@ public class RealisticFuelSystem : Script
         // bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
         
         Vector3 posForGroundCheck = new Vector3(dropPosition.X, dropPosition.Y, dropPosition.Z);
-        float groundZ = World.GetGroundHeight(posForGroundCheck);
-        bool groundFound = (groundZ != 0.0f); // Basic check; World.GetGroundHeight returns 0 if not found.
-                                             // A more robust check might be Math.Abs(groundZ - dropPosition.Z) < someThreshold if dropPosition.Z is expected to be near ground.
-                                             // Or simply if groundZ is not some obviously invalid value if the area can have 0.0f as actual ground.
-                                             // For now, groundZ != 0.0f is a common way to check if a ground height was returned.
+        // float groundZ = World.GetGroundHeight(posForGroundCheck); // Obsolete version
+        // bool groundFound = (groundZ != 0.0f); // Old check
+
+        float groundZ; // Declare groundZ for the out parameter
+        // Use GetGroundHeightMode.Default for standard behavior.
+        // The boolean returned by this overload directly indicates if ground was found.
+        bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Default);
 
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
