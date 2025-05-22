@@ -284,6 +284,9 @@ public class RealisticFuelSystem : Script
     private readonly float jerryCanCapacity = 20.0f; // 20 litres d'essence
     private float jerryCanFuel = 20.0f;
     private readonly Keys useJerryCanKey = Keys.E;
+    private bool isRefuelingWithJerryCan = false;
+    private Vehicle? currentJerryCanRefuelVehicle = null;
+    private readonly float jerryCanRefillRate = 1.0f; // Litres per second, adjust as needed
     
     // Add variables for jerrycan UI and dropped jerrycan
     private bool showJerryCanUI = false;
@@ -573,6 +576,75 @@ public class RealisticFuelSystem : Script
         {
             DisplayJerryCanUI();
         }
+
+        // Gérer le ravitaillement avec jerrycan en cours
+        if (isRefuelingWithJerryCan && currentJerryCanRefuelVehicle != null && currentJerryCanRefuelVehicle.Exists())
+        {
+            Ped playerPed = Game.Player.Character;
+
+            // Distance Check
+            if (playerPed.Position.DistanceTo(currentJerryCanRefuelVehicle.Position) > 5.0f)
+            {
+                isRefuelingWithJerryCan = false;
+                currentJerryCanRefuelVehicle = null;
+                playerPed.Task.ClearAll(); // Stop animation
+                Notification.PostTicker("~y~Ravitaillement avec jerrycan arrêté (trop éloigné).", true);
+            }
+            else
+            {
+                // Key Press Check
+                bool isKeyPressed = Function.Call<bool>(Hash.IS_CONTROL_PRESSED, 0, 51); // INPUT_CONTEXT (E key)
+
+                if (isKeyPressed)
+                {
+                    int vehicleID = currentJerryCanRefuelVehicle.Handle;
+                    if (!vehicleFuelLevels.ContainsKey(vehicleID))
+                    {
+                        InitializeVehicleFuel(currentJerryCanRefuelVehicle);
+                    }
+                    float currentFuel = vehicleFuelLevels[vehicleID];
+                    float capacity = GetVehicleFuelCapacity(currentJerryCanRefuelVehicle);
+
+                    // Check if JerryCan has fuel and vehicle needs fuel
+                    if (jerryCanFuel > 0 && currentFuel < capacity)
+                    {
+                        float deltaTime = (Interval == 0 ? consumptionUpdateInterval / 1000.0f : Interval / 1000.0f);
+                        float fuelToAdd = Math.Min(jerryCanRefillRate * deltaTime, capacity - currentFuel);
+                        fuelToAdd = Math.Min(fuelToAdd, jerryCanFuel); // Don't add more than jerryCan has
+
+                        vehicleFuelLevels[vehicleID] += fuelToAdd;
+                        jerryCanFuel -= fuelToAdd;
+
+                        DisplayHelpTextThisFrame($"Ravitaillement Jerrycan: {vehicleFuelLevels[vehicleID]:F1}/{capacity:F1}L | Jerrycan: {jerryCanFuel:F1}L");
+
+                        // Handle empty JerryCan or full tank during refueling
+                        if (jerryCanFuel <= 0 || vehicleFuelLevels[vehicleID] >= capacity)
+                        {
+                            isRefuelingWithJerryCan = false;
+                            playerPed.Task.ClearAll(); // Stop animation
+                            Notification.PostTicker(jerryCanFuel <= 0 ? "~y~Jerrycan vide." : "~g~Réservoir plein.", true);
+                            if (jerryCanFuel <= 0) { HandleEmptyJerryCanProcedure(playerPed); }
+                            currentJerryCanRefuelVehicle = null;
+                        }
+                    }
+                    else // JerryCan empty or tank full at start of tick while key held
+                    {
+                        isRefuelingWithJerryCan = false;
+                        playerPed.Task.ClearAll(); // Stop animation
+                        Notification.PostTicker(jerryCanFuel <= 0 ? "~y~Jerrycan vide." : "~g~Réservoir plein.", true);
+                        if (jerryCanFuel <= 0 && !jerryCanDropped) { HandleEmptyJerryCanProcedure(playerPed); }
+                        currentJerryCanRefuelVehicle = null;
+                    }
+                }
+                else // (!isKeyPressed - key released)
+                {
+                    isRefuelingWithJerryCan = false;
+                    playerPed.Task.ClearAll(); // Stop animation
+                    Notification.PostTicker("~y~Ravitaillement avec jerrycan arrêté.", true);
+                    currentJerryCanRefuelVehicle = null;
+                }
+            }
+        }
         
         // Sauvegarder périodiquement les données
         // The original condition `Game.GameTime % 60000 < Interval` would always be true if Interval is 0.
@@ -603,8 +675,58 @@ public class RealisticFuelSystem : Script
             // Vérifier si le joueur a un jerrycan et est à pied
             if (hasJerryCan && playerPed.CurrentVehicle == null)
             {
-                UseJerryCan();
-                return;
+                // Check if jerrycan has fuel
+                if (jerryCanFuel <= 0)
+                {
+                    Notification.PostTicker("~r~Votre jerrycan est vide.", true);
+                    return;
+                }
+
+                // Find the nearest vehicle
+                Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerPed.Position, 5.0f);
+                Vehicle? nearestVehicle = null;
+                float minDistance = float.MaxValue;
+
+                foreach (Vehicle vehicle in nearbyVehicles)
+                {
+                    if (vehicle != null && vehicle.Exists()) // Ensure vehicle exists
+                    {
+                        float distance = vehicle.Position.DistanceTo(playerPed.Position);
+                        if (distance < minDistance)
+                        {
+                            minDistance = distance;
+                            nearestVehicle = vehicle;
+                        }
+                    }
+                }
+
+                if (nearestVehicle != null)
+                {
+                    int vehicleID = nearestVehicle.Handle;
+                    if (!vehicleFuelLevels.ContainsKey(vehicleID))
+                    {
+                        InitializeVehicleFuel(nearestVehicle);
+                    }
+                    float currentFuel = vehicleFuelLevels[vehicleID];
+                    float capacity = GetVehicleFuelCapacity(nearestVehicle);
+
+                    if (currentFuel >= capacity)
+                    {
+                        Notification.PostTicker("~y~Le réservoir de ce véhicule est déjà plein.", true);
+                        return;
+                    }
+
+                    // Start refueling with JerryCan
+                    isRefuelingWithJerryCan = true;
+                    currentJerryCanRefuelVehicle = nearestVehicle;
+                    Function.Call(Hash.TASK_PLAY_ANIM, playerPed.Handle, "mp_arresting", "a_uncuff", 8.0f, -8.0f, -1, 48, 0, false, false, false);
+                    Notification.PostTicker("~b~Début du ravitaillement avec jerrycan. Maintenez ~INPUT_CONTEXT~ pour continuer.", true);
+                }
+                else
+                {
+                    Notification.PostTicker("~y~Aucun véhicule à proximité pour utiliser le jerrycan.", true);
+                }
+                return; // Important: return after handling jerrycan logic
             }
             
             // Si on est près d'une station-service et pas en train de faire le plein
@@ -1350,142 +1472,53 @@ public class RealisticFuelSystem : Script
         }
     }
     
+    // Méthode pour gérer quand le jerrycan devient vide
+    private void HandleEmptyJerryCanProcedure(Ped playerPed)
+    {
+        Notification.PostTicker("~y~Votre jerrycan est maintenant vide.", true);
+
+        // Retirer l'arme jerrycan
+        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, (int)WeaponHash.PetrolCan);
+        // It seems there were other hashes for PetrolCan in the original code, let's include them for safety.
+        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 883325847); 
+        Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 1168162263);
+
+
+        // Faire tomber le jerrycan au sol (créer un prop)
+        Vector3 dropPosition = playerPed.Position;
+        jerryCanDropped = true;
+        droppedJerryCanPosition = dropPosition;
+        jerryCanDisappearTimer = 0;
+
+        // Créer l'objet jerrycan au sol
+        int jerryCanProp = Function.Call<int>(Hash.CREATE_OBJECT,
+            Function.Call<int>(Hash.GET_HASH_KEY, "prop_jerrycan_01a"),
+            dropPosition.X, dropPosition.Y, dropPosition.Z - 1.0f, // Adjust Z to be on ground
+            true, true, false);
+
+        // Marquer comme non ramassable et dynamique
+        if (jerryCanProp != 0)
+        {
+            Function.Call(Hash.SET_ENTITY_COLLISION, jerryCanProp, true, true);
+            Function.Call(Hash.SET_ENTITY_DYNAMIC, jerryCanProp, true);
+            // Optional: Apply some physics so it falls naturally
+            Function.Call(Hash.APPLY_FORCE_TO_ENTITY, jerryCanProp, 1, 0.0f, 0.0f, -0.5f, 0.0f, 0.0f, 0.0f, 0, true, true, true, true, true);
+
+        }
+
+        hasJerryCan = false; // Player no longer "has" a usable jerrycan (it's empty and dropped)
+        showJerryCanUI = false; // No UI if no usable jerrycan
+    }
+    
     // Méthode pour utiliser le jerrycan
     private void UseJerryCan()
     {
-        try
-        {
-            // Récupérer le personnage du joueur
-            Ped playerPed = Game.Player.Character;
-            
-            // Vérifier si le jerrycan est équipé de manière sécurisée
-            bool isJerryCanEquipped = false;
-            
-            try
-            {
-                uint selectedWeapon = Function.Call<uint>(Hash.GET_SELECTED_PED_WEAPON, playerPed.Handle);
-                isJerryCanEquipped = (selectedWeapon == (uint)WeaponHash.PetrolCan);
-            }
-            catch
-            {
-                // En cas d'erreur, considérer que l'arme n'est pas équipée
-                isJerryCanEquipped = false;
-            }
-            
-            // Vérifier si le joueur a un jerrycan équipé et du carburant
-            if (!hasJerryCan || !isJerryCanEquipped || jerryCanFuel <= 0)
-            {
-                Notification.PostTicker("~r~Vous devez avoir un jerrycan en main et il doit contenir du carburant!", true);
-                return;
-            }
-            
-            // Le joueur doit être à pied
-            if (playerPed.CurrentVehicle != null)
-            {
-                Notification.PostTicker("~y~Vous devez descendre du véhicule pour utiliser le jerrycan.", true);
-                return;
-            }
-            
-            // Trouver le véhicule le plus proche
-            Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerPed.Position, 5.0f);
-            Vehicle? nearestVehicle = null;
-            float minDistance = float.MaxValue;
-            
-            // Parcourir manuellement le tableau pour trouver le plus proche
-            foreach (Vehicle vehicle in nearbyVehicles)
-            {
-                if (vehicle != null)
-                {
-                    float distance = vehicle.Position.DistanceTo(playerPed.Position);
-                    if (distance < minDistance)
-                    {
-                        minDistance = distance;
-                        nearestVehicle = vehicle;
-                    }
-                }
-            }
-            
-            if (nearestVehicle != null)
-            {
-                // Vérifier le niveau de carburant actuel du véhicule
-                int vehicleID = nearestVehicle.Handle;
-                
-                // S'assurer que le véhicule est initialisé
-                if (!vehicleFuelLevels.ContainsKey(vehicleID))
-                {
-                    InitializeVehicleFuel(nearestVehicle);
-                }
-                
-                float currentFuel = vehicleFuelLevels[vehicleID];
-                float capacity = GetVehicleFuelCapacity(nearestVehicle);
-                
-                // Si le réservoir est déjà plein
-                if (currentFuel >= capacity)
-                {
-                    Notification.PostTicker("~y~Le réservoir de ce véhicule est déjà plein.", true);
-                    return;
-                }
-                
-                // Animation d'utilisation du jerrycan
-                Function.Call(Hash.TASK_PLAY_ANIM, playerPed.Handle, "mp_arresting", "a_uncuff", 8.0f, -8.0f, -1, 48, 0, false, false, false);
-                
-                // Ajouter du carburant au véhicule (maximum jerryCanFuel ou ce qui manque au réservoir)
-                float fuelToAdd = Math.Min(jerryCanFuel, capacity - currentFuel);
-                vehicleFuelLevels[vehicleID] = currentFuel + fuelToAdd;
-                
-                // Réduire le carburant du jerrycan
-                jerryCanFuel -= fuelToAdd;
-                
-                // Notification
-                Notification.PostTicker($"~g~Vous avez ajouté {fuelToAdd:F1} litres d'essence au véhicule.", true);
-                
-                // Si le jerrycan est vide, le faire tomber au sol
-                if (jerryCanFuel <= 0)
-                {
-                    Notification.PostTicker("~y~Votre jerrycan est maintenant vide.", true);
-                    
-                    // Retirer l'arme jerrycan
-                    Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 883325847);
-                    Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, 1168162263);
-                    Function.Call(Hash.REMOVE_WEAPON_FROM_PED, playerPed.Handle, (int)WeaponHash.PetrolCan);
-                    
-                    // Faire tomber le jerrycan au sol (créer un prop)
-                    Vector3 dropPosition = playerPed.Position;
-                    jerryCanDropped = true;
-                    droppedJerryCanPosition = dropPosition;
-                    jerryCanDisappearTimer = 0;
-                    
-                    // Créer l'objet jerrycan au sol
-                    int jerryCanProp = Function.Call<int>(Hash.CREATE_OBJECT, 
-                        Function.Call<int>(Hash.GET_HASH_KEY, "prop_jerrycan_01a"), 
-                        dropPosition.X, dropPosition.Y, dropPosition.Z - 1.0f, 
-                        true, true, false);
-                        
-                    // Marquer comme non ramassable
-                    if (jerryCanProp != 0)
-                    {
-                        Function.Call(Hash.SET_ENTITY_COLLISION, jerryCanProp, true, true);
-                        Function.Call(Hash.SET_ENTITY_DYNAMIC, jerryCanProp, true);
-                    }
-                    
-                    hasJerryCan = false;
-                    showJerryCanUI = false;
-                }
-                else
-                {
-                    Notification.PostTicker($"~b~Jerrycan: {jerryCanFuel:F1}/{jerryCanCapacity} litres restants.", true);
-                }
-            }
-            else
-            {
-                Notification.PostTicker("~y~Aucun véhicule à proximité.", true);
-            }
-        }
-        catch (Exception ex)
-        {
-            // En cas d'erreur, afficher un message et continuer
-            Notification.PostTicker($"~r~Erreur lors de l'utilisation du jerrycan: {ex.Message}", true);
-        }
+        // This method is now largely deprecated. 
+        // The logic to initiate jerrycan refueling is in OnKeyDown.
+        // The timed refueling logic is in OnTick.
+        // The logic to handle an empty jerrycan is in HandleEmptyJerryCanProcedure.
+        // This method could be removed entirely if no other part of the script calls it.
+        // For now, leaving it empty as per the plan.
     }
     
     // Méthode pour gérer le jerrycan tombé au sol
