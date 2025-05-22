@@ -1517,6 +1517,7 @@ public class RealisticFuelSystem : Script
         float groundZ;
         // GET_GROUND_Z_FOR_3D_COORD uses 'bool getGroundZ(float x, float y, float z, out float groundZ, bool unk)'
         // The last parameter 'unk' is usually false for scripts.
+        // Correcting the call to ensure proper syntax for GET_GROUND_Z_FOR_3D_COORD
         bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
         
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
