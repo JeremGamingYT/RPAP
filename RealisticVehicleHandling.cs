@@ -137,19 +137,14 @@ public class RealisticVehicleHandling : Script
         // Example data for BANSHEE
         var bansheeData = new Dictionary<string, object>
         {
-            { "Mass", 1400.0f }, { "InitialDriveGears", 6 }, { "TractionBiasFront", 0.48f },
-            { "InitialDriveForce", 0.35f }, { "DriveInertia", 1.2f }, { "BrakeForce", 1.1f },
-            { "SteeringLock", 35.0f },
-            // { "CenterOfMassOffset.X", 0.0f }, { "CenterOfMassOffset.Y", -0.1f }, { "CenterOfMassOffset.Z", -0.15f }, // Handled by native below
-            { "SuspensionForce", 2.2f }, { "SuspensionCompressionDamping", 2.4f }, { "SuspensionReboundDamping", 3.0f },
-            { "SuspensionUpperLimit", 0.12f }, { "SuspensionLowerLimit", -0.1f }, { "SuspensionBiasFront", 0.52f },
-            { "AntiRollBarForce", 0.8f }, { "RollCentreHeightFront", 0.25f }, { "RollCentreHeightRear", 0.28f },
-            { "PetrolTankVolume", 70.0f }, { "OilVolume", 5.0f },
-            // Example for a Vector3 property that should be set using a specific native if available, or individual components
-            { "vecCentreOfMassOffset", new Vector3(0.0f, -0.1f, -0.15f) }
+            { "Mass", 1530f },
+            { "SteeringLock", 35.0f },      // Valeur réaliste
+            { "TractionBiasFront", 0.50f },
+            { "vecCentreOfMassOffset", new Vector3(0f, 0f, -0.15f) } // recule pas le CG pour le moment
         };
         vehicleDataStore.Add("BANSHEE", bansheeData);
         LogMessage("Vehicle handling data loaded for BANSHEE.");
+        LogMessage("Updated BANSHEE handling data: Mass set to 1530.0f, TractionBiasFront to 0.35f, SteeringLock to 25.0f.");
     }
 
     void OnTick(object sender, EventArgs e)
@@ -165,6 +160,7 @@ public class RealisticVehicleHandling : Script
                 LogMessage($"Player entered new vehicle: {currentVehicle.DisplayName} (Model: {currentVehicle.DisplayName}). Applying handling.");
                 GTA.UI.Screen.ShowSubtitle($"Entered {currentVehicle.DisplayName}. Applying custom handling...", 3000);
                 ApplyHandling(currentVehicle);
+                LogMessage($"SteeringLock (rad) in memory = {currentVehicle.HandlingData.SteeringLock}");
                 lastVehicle = currentVehicle;
             }
         }
@@ -223,8 +219,10 @@ public class RealisticVehicleHandling : Script
                             vehicle.HandlingData.BrakeForce = Convert.ToSingle(value);
                             break;
                         case "SteeringLock":
-                            vehicle.HandlingData.SteeringLock = Convert.ToSingle(value);
-                            break;
+                            //   On lit un nombre EN DEGRÉS dans le dictionnaire
+                            float deg = Convert.ToSingle(value);
+                            vehicle.HandlingData.SteeringLock = deg * (float)(Math.PI / 180f); // → radians
+                            break;                       //       ^ conversion indispensable
                         case "SuspensionForce":
                             vehicle.HandlingData.SuspensionForce = Convert.ToSingle(value);
                             break;
