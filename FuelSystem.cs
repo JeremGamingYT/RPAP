@@ -8,11 +8,12 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 using System.Linq;
+using RealHandlingLib;   // ← ajoute cette ligne
 
 public class RealisticFuelSystem : Script
 {
     // Configuration du système de carburant
-    private readonly float fuelConsumptionBaseRate = 0.03f;  // Consommation de base (par seconde à 60 km/h)
+    private readonly float fuelConsumptionBaseRate = 0.006f;  // Consommation de base (par seconde à 60 km/h)
     private readonly float idleConsumptionRate = 0.005f;     // Consommation au ralenti (par seconde)
     private readonly float maxFuelCapacity = 100.0f;         // Capacité maximale par défaut
     private readonly float refillRate = 2.0f;                // Taux de remplissage à la station-service (par seconde)
@@ -447,6 +448,7 @@ public class RealisticFuelSystem : Script
                      fuelLevelForDisplay = vehicleFuelLevels.ContainsKey(vehicleID) ? vehicleFuelLevels[vehicleID] : 0;
                 }
                 DisplayFuelHUD(playerVehicle, fuelLevelForDisplay);
+                DisplaySpeedometer(playerVehicle);
             }
             
             // Si le joueur est en attente de paiement et monte dans un véhicule, c'est un vol
@@ -530,7 +532,8 @@ public class RealisticFuelSystem : Script
                 // Ajouter du carburant
                 if (currentFuel < maxFuel)
                 {
-                    float fuelToAdd = Math.Min(refillRate * (Interval / 1000.0f), maxFuel - currentFuel);
+                    float fuelToAdd = refillRate * Game.LastFrameTime;      // L ajoutés cette frame  
+                    fuelToAdd = Math.Min(fuelToAdd, maxFuel - currentFuel); // ne dépasse pas le plein
                     currentFuel += fuelToAdd;
                     refuelingAmount += fuelToAdd;
                     
@@ -687,9 +690,11 @@ public class RealisticFuelSystem : Script
                 return;
             
             Ped playerPed = Game.Player.Character;
-            
-            // Vérifier si le joueur a un jerrycan et est à pied
-            if (hasJerryCan && playerPed.CurrentVehicle == null)
+
+            uint selWeapon  = Function.Call<uint>(Hash.GET_SELECTED_PED_WEAPON, playerPed.Handle);
+            bool jerryEquipped = (selWeapon == (uint)WeaponHash.PetrolCan);
+
+            if (jerryEquipped && playerPed.CurrentVehicle == null)
             {
                 // Check if jerrycan has fuel
                 if (jerryCanFuel <= 0)
@@ -744,6 +749,7 @@ public class RealisticFuelSystem : Script
                 }
                 return; // Important: return after handling jerrycan logic
             }
+            
             
             // Si on est près d'une station-service et pas en train de faire le plein
             if (isNearGasStation && !isRefueling)
@@ -915,47 +921,33 @@ public class RealisticFuelSystem : Script
     
     private float CalculateFuelConsumption(Vehicle vehicle)
     {
-        // Consommation de base en fonction du temps écoulé depuis la dernière frame
-        float consumption = fuelConsumptionBaseRate * (consumptionUpdateInterval / 1000.0f);
-        
-        // Si le véhicule est au ralenti
+        // Consommation de base (réglée un peu plus bas que ta valeur d’origine)
+        //const float baseRate = 0.006f;            // litres / s @ 60 km/h
+        float consumption = fuelConsumptionBaseRate * (consumptionUpdateInterval / 1000f);
+
+        // Ralenti
         if (vehicle.Speed < 0.1f)
+            return idleConsumptionRate * (consumptionUpdateInterval / 1000f);
+
+        // Facteurs dynamiques
+        float speedFactor        = (float)Math.Pow(vehicle.Speed / 10f, 1.5);
+        float accelerationFactor = vehicle.Acceleration > 0.1f ? 1f + vehicle.Acceleration * 5f : 1f;
+        float slopeFactor        = 1f;
+
+        if (World.GetGroundHeight(vehicle.Position, out float ground))
         {
-            return idleConsumptionRate * (consumptionUpdateInterval / 1000.0f);
+            float dz = vehicle.Position.Z - ground;
+            slopeFactor = dz > 1f ? 1.2f : dz < -1f ? 0.8f : 1f;
         }
-        
-        // Facteur basé sur la vitesse (consommation augmente de façon exponentielle avec la vitesse)
-        float speedFactor = (float)Math.Pow(vehicle.Speed / 10.0f, 1.5);
-        
-        // Facteur basé sur l'accélération
-        float accelerationFactor = 1.0f;
-        if (vehicle.Acceleration > 0.1f)
-        {
-            accelerationFactor = 1.0f + (vehicle.Acceleration * 5.0f);
-        }
-        
-        // Facteur basé sur le terrain/pente
-        float slopeFactor = 1.0f;
-        float groundHeight;
-        if (World.GetGroundHeight(vehicle.Position, out groundHeight))
-        {
-            float heightDifference = vehicle.Position.Z - groundHeight;
-            
-            if (heightDifference > 1.0f) // Montée
-            {
-                slopeFactor = 1.2f;
-            }
-            else if (heightDifference < -1.0f) // Descente
-            {
-                slopeFactor = 0.8f;
-            }
-        }
-        
-        // Facteur basé sur le type de véhicule
+
         float vehicleTypeFactor = GetVehicleTypeFuelFactor(vehicle);
-        
-        // Calculer la consommation finale
-        return consumption * speedFactor * accelerationFactor * slopeFactor * vehicleTypeFactor;
+
+        // Modificateur par modèle (glouton ou sobre)
+        float mult = 1f;
+        if (RealisticVehicleData.Specs.TryGetValue(vehicle.DisplayName.ToUpper(), out var spec))
+            mult = spec.ConsumptionMult;
+
+        return mult * consumption * speedFactor * accelerationFactor * slopeFactor * vehicleTypeFactor;
     }
     
     private float GetVehicleTypeFuelFactor(Vehicle vehicle)
@@ -990,14 +982,15 @@ public class RealisticFuelSystem : Script
     
     private float GetVehicleFuelCapacity(Vehicle vehicle)
     {
-        // Obtenir la capacité en fonction du type de véhicule
+        // Priorité aux données réalistes du mod Handling
+        if (RealisticVehicleData.Specs.TryGetValue(vehicle.DisplayName.ToUpper(), out var spec) && spec.FuelCapacity > 0)
+            return spec.FuelCapacity;
+
+        // Fallback : anciennes capacités par classe
         if (vehicleFuelCapacities.TryGetValue(vehicle.ClassType, out float capacity))
-        {
             return capacity;
-        }
-        
-        // Capacité par défaut
-        return maxFuelCapacity;
+
+        return maxFuelCapacity;  // défaut
     }
     
     private FuelType GetVehicleFuelType(Vehicle vehicle)
@@ -1291,18 +1284,34 @@ public class RealisticFuelSystem : Script
         DisplaySimpleFuelIndicator(fuelTypeText, percentage, color);
     }
     
-    // Méthode simplifiée pour afficher un indicateur de carburant (comme le speedometer)
+    // ------------------------------------------------------------
+    // Mini HUD carburant — ex : ESSENCE : 78 %
     private void DisplaySimpleFuelIndicator(string fuelType, float percentage, Color color)
     {
-        // Utiliser une approche similaire au compteur de vitesse (simple texte)
-        Function.Call(Hash.SET_TEXT_FONT, 4);
-        Function.Call(Hash.SET_TEXT_SCALE, 0.4f, 0.4f);
-        Function.Call(Hash.SET_TEXT_COLOUR, color.R, color.G, color.B, 255);
+        Function.Call(Hash.SET_TEXT_FONT,    4);
+        Function.Call(Hash.SET_TEXT_SCALE,   0.40f, 0.40f);
+        Function.Call(Hash.SET_TEXT_COLOUR,  color.R, color.G, color.B, 255);
         Function.Call(Hash.SET_TEXT_DROPSHADOW, 2, 2, 0, 0, 0);
         Function.Call(Hash.SET_TEXT_OUTLINE);
         Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
         Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $"{fuelType}: {percentage:F1}%");
-        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, 0.91f, 0.965f);
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, 0.18f, 0.825f);   // ← X & Y
+    }
+
+    // ------------------------------------------------------------
+    // Speedometer km/h (placé juste à droite de la mini-map)
+    private void DisplaySpeedometer(Vehicle veh)
+    {
+        float kmh = veh.Speed * 3.6f;          // m/s → km/h
+
+        Function.Call(Hash.SET_TEXT_FONT,    4);
+        Function.Call(Hash.SET_TEXT_SCALE,   0.45f, 0.45f);
+        Function.Call(Hash.SET_TEXT_COLOUR,  255, 255, 255, 255);
+        Function.Call(Hash.SET_TEXT_DROPSHADOW, 2, 2, 0, 0, 0);
+        Function.Call(Hash.SET_TEXT_OUTLINE);
+        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $"{kmh:0} km/h");
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, 0.18f, 0.855f);   // ← X & Y
     }
     
     private void DisplayHelpTextThisFrame(string text)
