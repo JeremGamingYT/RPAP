@@ -1514,24 +1514,24 @@ public class RealisticFuelSystem : Script
             return;
         }
 
-        // float groundZ; // Old declaration for Function.Call
-        // // GET_GROUND_Z_FOR_3D_COORD uses 'bool getGroundZ(float x, float y, float z, out float groundZ, bool unk)'
-        // // The last parameter 'unk' is usually false for scripts.
-        // // Correcting the call to ensure proper syntax for GET_GROUND_Z_FOR_3D_COORD
-        // bool groundFound = Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, dropPosition.X, dropPosition.Y, dropPosition.Z, out groundZ, false);
-        
         Vector3 posForGroundCheck = new Vector3(dropPosition.X, dropPosition.Y, dropPosition.Z);
-        // float groundZ = World.GetGroundHeight(posForGroundCheck); // Obsolete version
-        // bool groundFound = (groundZ != 0.0f); // Old check
-
-        // float groundZ; // Old declaration for Function.Call / non-obsolete GetGroundHeight
-        // Use GetGroundHeightMode.Precise for standard behavior.
-        // The boolean returned by this overload directly indicates if ground was found.
-        // bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Precise); // Non-obsolete version
-
-        // Reverting to obsolete version for SHVDN v3 compatibility
-        float groundZ = World.GetGroundHeight(posForGroundCheck);
-        bool groundFound = (groundZ != 0.0f); // Original basic check for obsolete version
+        
+        // Use the old but compatible method to get ground height, with warning suppression
+        float groundZ;
+        bool groundFound;
+        
+        #pragma warning disable 0618
+        try {
+            // This is deprecated but works reliably across SHVDN versions
+            groundZ = World.GetGroundHeight(posForGroundCheck);
+            groundFound = (groundZ != 0.0f);
+        }
+        catch {
+            // Fallback if the method fails
+            groundZ = dropPosition.Z - 1.0f;
+            groundFound = false;
+        }
+        #pragma warning restore 0618
 
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
