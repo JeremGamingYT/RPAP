@@ -1525,9 +1525,9 @@ public class RealisticFuelSystem : Script
         // bool groundFound = (groundZ != 0.0f); // Old check
 
         float groundZ; // Declare groundZ for the out parameter
-        // Use GetGroundHeightMode.Default for standard behavior.
+        // Use GetGroundHeightMode.Precise for standard behavior.
         // The boolean returned by this overload directly indicates if ground was found.
-        bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Default);
+        bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Precise);
 
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
