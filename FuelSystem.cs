@@ -1524,10 +1524,14 @@ public class RealisticFuelSystem : Script
         // float groundZ = World.GetGroundHeight(posForGroundCheck); // Obsolete version
         // bool groundFound = (groundZ != 0.0f); // Old check
 
-        float groundZ; // Declare groundZ for the out parameter
+        // float groundZ; // Old declaration for Function.Call / non-obsolete GetGroundHeight
         // Use GetGroundHeightMode.Precise for standard behavior.
         // The boolean returned by this overload directly indicates if ground was found.
-        bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Precise);
+        // bool groundFound = World.GetGroundHeight(posForGroundCheck, out groundZ, GetGroundHeightMode.Precise); // Non-obsolete version
+
+        // Reverting to obsolete version for SHVDN v3 compatibility
+        float groundZ = World.GetGroundHeight(posForGroundCheck);
+        bool groundFound = (groundZ != 0.0f); // Original basic check for obsolete version
 
         float spawnZ = groundFound ? groundZ + 0.2f : dropPosition.Z + 0.1f; // Spawn slightly above ground or ped Z + small offset
 
