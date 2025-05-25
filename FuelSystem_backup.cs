@@ -1281,57 +1281,22 @@ public class RealisticFuelSystem : Script
         }
         
         // Afficher l'indicateur de carburant en utilisant une approche simplifiée
-        // DisplaySimpleFuelIndicator(fuelTypeText, percentage, color); // Old method removed
-
-        // Define Bar Parameters (consistent with RealisticTyreWearAndTemperature.cs)
-        float barAreaLeftEdge = 0.02f; // Distance from very left of screen
-        float barWidth = 0.01f;
-        float barMaxHeight = 0.04f;
-        float barSpacingY = 0.008f; // Vertical spacing between bars
-        float initialYPos = 0.65f; // Starting Y for the first bar (from RealisticTyreWearAndTemperature)
-
-        // Calculate Position for Fuel Bar
-        // Tyre bar is at initialYPos
-        // Engine Temp bar is at initialYPos + barMaxHeight + barSpacingY
-        // Fuel bar should be below the Engine Temp bar:
-        float fuelBarY = initialYPos + 2 * (barMaxHeight + barSpacingY);
-
-        // Use the determined color for the fuel bar
-        Color fuelColor = color; // Color determined by existing logic in DisplayFuelHUD
-
-        // Use the determined fuelTypeText for the label
-        string fuelLabel = fuelTypeText;
-
-        // Call the static DrawVerticalBar method from RealisticTyreWearAndTemperature script
-        RealisticTyreWearAndTemperature.DrawVerticalBar(
-            fuelLabel,
-            fuelLevel, // current fuel level
-            capacity,  // max capacity
-            barAreaLeftEdge + barWidth / 2f, // xPosition (center of the bar)
-            fuelBarY,                        // yPosition (top edge of the bar)
-            barWidth,
-            barMaxHeight,
-            fuelColor,
-            Color.White, // Label color
-            false,       // drawPercentage = false, show as value/max
-            0.30f,       // labelSize
-            0            // font
-        );
+        DisplaySimpleFuelIndicator(fuelTypeText, percentage, color);
     }
     
     // ------------------------------------------------------------
-    // Mini HUD carburant — ex : ESSENCE : 78 % - This method is now removed.
-    // private void DisplaySimpleFuelIndicator(string fuelType, float percentage, Color color)
-    // {
-    //     Function.Call(Hash.SET_TEXT_FONT,    4);
-    //     Function.Call(Hash.SET_TEXT_SCALE,   0.40f, 0.40f);
-    //     Function.Call(Hash.SET_TEXT_COLOUR,  color.R, color.G, color.B, 255);
-    //     Function.Call(Hash.SET_TEXT_DROPSHADOW, 2, 2, 0, 0, 0);
-    //     Function.Call(Hash.SET_TEXT_OUTLINE);
-    //     Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
-    //     Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $"{fuelType}: {percentage:F1}%");
-    //     Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, 0.18f, 0.825f);   // ← X & Y
-    // }
+    // Mini HUD carburant — ex : ESSENCE : 78 %
+    private void DisplaySimpleFuelIndicator(string fuelType, float percentage, Color color)
+    {
+        Function.Call(Hash.SET_TEXT_FONT,    4);
+        Function.Call(Hash.SET_TEXT_SCALE,   0.40f, 0.40f);
+        Function.Call(Hash.SET_TEXT_COLOUR,  color.R, color.G, color.B, 255);
+        Function.Call(Hash.SET_TEXT_DROPSHADOW, 2, 2, 0, 0, 0);
+        Function.Call(Hash.SET_TEXT_OUTLINE);
+        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $"{fuelType}: {percentage:F1}%");
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, 0.18f, 0.825f);   // ← X & Y
+    }
 
     // ------------------------------------------------------------
     // Speedometer km/h (placé juste à droite de la mini-map)
