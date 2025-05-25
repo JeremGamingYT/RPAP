@@ -31,7 +31,7 @@ namespace RealHandlingLib
         public static readonly Dictionary<string, Spec> Specs = new()
         {
             // ——— super / hypercars ——————————————————————————
-            ["ADDER"]    = new Spec { Mass=1888f, SteeringDeg=35f, TractionBiasFront=0.52f, CenterOfMass=new Vector3(0,0,-0.15f), InitialDriveForce=0.40f, BrakeForce=1.00f, DeformationMult=1.50f, CollisionMult=2.00f, FuelCapacity=100f, ConsumptionMult=1.45f },
+            ["ADDER"]    = new Spec { Mass=1888f, SteeringDeg=35f, TractionBiasFront=0.52f, CenterOfMass=new Vector3(0,0,-0.15f), InitialDriveForce=0.40f, BrakeForce=1.00f, DeformationMult=20.0f, CollisionMult=10.00f, FuelCapacity=100f, ConsumptionMult=1.45f },
             ["TURISMOR"] = new Spec { Mass=1255f, SteeringDeg=35f, TractionBiasFront=0.50f, CenterOfMass=new Vector3(0,0,-0.12f), InitialDriveForce=0.36f, BrakeForce=0.95f, DeformationMult=0.35f, CollisionMult=0.55f, FuelCapacity=90f,  ConsumptionMult=1.40f },
             ["T20"]      = new Spec { Mass=1547f, SteeringDeg=35f, TractionBiasFront=0.50f, CenterOfMass=new Vector3(0,0,-0.12f), InitialDriveForce=0.36f, BrakeForce=0.95f, DeformationMult=0.40f, CollisionMult=0.60f, FuelCapacity=90f,  ConsumptionMult=1.40f },
             ["ZENTORNO"] = new Spec { Mass=1365f, SteeringDeg=35f, TractionBiasFront=0.52f, CenterOfMass=new Vector3(0,0,-0.12f), InitialDriveForce=0.38f, BrakeForce=0.95f, DeformationMult=0.35f, CollisionMult=0.55f, FuelCapacity=90f,  ConsumptionMult=1.45f },

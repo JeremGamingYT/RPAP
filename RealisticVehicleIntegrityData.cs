@@ -2,39 +2,31 @@ using System.Collections.Generic;
 
 namespace RealHandlingLib
 {
-    /// <summary>
-    ///  Spécifie à partir de quel seuil un véhicule PEUT exploser
-    ///  (engineHealth <= ExplosionThreshold  &&  véhicule en flammes depuis FireTimeBeforeBoom)
-    /// </summary>
     public struct IntegritySpec
     {
-        public float ExplosionThreshold;   // ex : -2000  (GTA vanilla : ~-4000)
-        public float FireTimeBeforeBoom;   // secondes de feu avant autorisation d'explosion
+        public float ExplosionThreshold;   // engineHealth ≤ threshold
+        public float FireTimeBeforeBoom;   // temps en flammes avant autorisation
     }
 
     public static class RealisticVehicleIntegrityData
     {
-        // Valeurs par défaut (si non listé)
-        public const float DefaultThreshold = -1500f;
-        public const float DefaultFireTime  = 12f;
+        public const float DefaultThreshold = -3000f; // explosions presque impossibles
+        public const float DefaultFireTime  = 20f;    // brûler longtemps avant de sauter
 
-        public static readonly Dictionary<string, IntegritySpec> Specs = new()
+        public static readonly Dictionary<string,IntegritySpec> Specs = new()
         {
-            // ——— hyper/super —------------------------------------
-            ["ADDER"]    = new IntegritySpec { ExplosionThreshold = -1800f, FireTimeBeforeBoom = 10f },
-            ["TURISMOR"] = new IntegritySpec { ExplosionThreshold = -1800f, FireTimeBeforeBoom = 10f },
-            ["T20"]      = new IntegritySpec { ExplosionThreshold = -1900f, FireTimeBeforeBoom = 11f },
-            ["ZENTORNO"] = new IntegritySpec { ExplosionThreshold = -1900f, FireTimeBeforeBoom = 11f },
+            ["ADDER"]    = new IntegritySpec { ExplosionThreshold = -3200f, FireTimeBeforeBoom = 25f },
+            ["TURISMOR"] = new IntegritySpec { ExplosionThreshold = -3200f, FireTimeBeforeBoom = 25f },
+            ["T20"]      = new IntegritySpec { ExplosionThreshold = -3300f, FireTimeBeforeBoom = 26f },
+            ["ZENTORNO"] = new IntegritySpec { ExplosionThreshold = -3300f, FireTimeBeforeBoom = 26f },
 
-            // ——— sport / coupé —-----------------------------------
-            ["BANSHEE"]  = new IntegritySpec { ExplosionThreshold = -1600f, FireTimeBeforeBoom = 9f  },
-            ["COMET2"]   = new IntegritySpec { ExplosionThreshold = -1600f, FireTimeBeforeBoom = 9f  },
-            ["ELEGY2"]   = new IntegritySpec { ExplosionThreshold = -1600f, FireTimeBeforeBoom = 9f  },
+            ["BANSHEE"]  = new IntegritySpec { ExplosionThreshold = -3000f, FireTimeBeforeBoom = 22f },
+            ["COMET2"]   = new IntegritySpec { ExplosionThreshold = -3000f, FireTimeBeforeBoom = 22f },
+            ["ELEGY2"]   = new IntegritySpec { ExplosionThreshold = -3000f, FireTimeBeforeBoom = 22f },
 
-            // ——— berlines / compacts / SUV —------------------------
-            ["ISSI2"]    = new IntegritySpec { ExplosionThreshold = -1200f, FireTimeBeforeBoom = 8f  },
-            ["BALLER2"]  = new IntegritySpec { ExplosionThreshold = -1400f, FireTimeBeforeBoom = 10f },
-            ["GRANGER"]  = new IntegritySpec { ExplosionThreshold = -1400f, FireTimeBeforeBoom = 10f },
+            ["ISSI2"]    = new IntegritySpec { ExplosionThreshold = -2700f, FireTimeBeforeBoom = 20f },
+            ["BALLER2"]  = new IntegritySpec { ExplosionThreshold = -2800f, FireTimeBeforeBoom = 23f },
+            ["GRANGER"]  = new IntegritySpec { ExplosionThreshold = -2800f, FireTimeBeforeBoom = 23f },
         };
     }
 }
