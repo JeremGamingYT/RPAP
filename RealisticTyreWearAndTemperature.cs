@@ -1,167 +1,182 @@
-// RealisticTyreWearAndTemperature.cs
-// v1.4 – grip fixe & chauffe réaliste
+// RealisticTyreWearAndTemperature v2.1-HF – HUD révisé + fix SHVDN3
+// © 2025 – Jerem + Atlas
 
 using GTA;
 using GTA.Native;
 using GTA.UI;
-using RealHandlingLib;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Reflection;
 
-public class RealisticTyreWearAndTemperature : Script
+public sealed class RealisticTyreWearAndTemperature : Script
 {
-    // —————————————————— réglages pneus
-    private const float TyreLifetimeKm      = 350f;
-    private const float WearGripLossFactor  = 0.6f;     // slick = –60 % grip
-    private const float WearBrakeBonus      = 0.0002f;  // freinage violent
-    private const float WearBurnoutBonus    = 0.0015f;  // burn-out
+    /* ─────────── PARAMS & STATE ─────────── */
+    private const float TyreLifetimeKm     = 200f;   // distance avant usure totale
+    private const float WearBurnoutBonus   = 0.008f; // usure extra lors des burnouts
+    private const float BlowoutThreshold   = 0.96f;
+    private const float RandomBlowoutChance= 0.003f;
 
-    // —————————————————— réglages température
-    private const float AmbientT            = 25f;
-    private const float NormalT             = 95f;
-    private const float OverheatT           = 110f;
-    private const float CriticalT           = 125f;
-    private const float IdleHeatPerSec      = 0.05f;    // ralenti
-    private const float HeatAccelPerSec     = 0.20f;    // plein gaz
-    private const float HeatSpeedPerKmh     = 0.002f;   // charge aéro
-    private const float CoolSpeedPerKmh     = 0.0012f;  // flux radiateur
-    private const float CoolEngineOff       = 0.18f;    // moteur coupé
-    private const float OverheatDmgPerSec   = 2f;
-    private const float CriticalTimeToFire  = 6f;
+    private const float AmbientT           = 22f;
+    private const float NormalT            = 95f;
+    private const float OverheatT          = 110f;
+    private const float CriticalT          = 125f;
 
-    // —————————————————— état
-    private readonly Dictionary<int,float> tyreWear   = new();
-    private readonly Dictionary<int,float> engineTemp = new();
-    private readonly Dictionary<int,float> overTimer  = new();
-    private readonly Dictionary<int,float> lastBrake  = new();
+    private readonly Dictionary<int,float[]> tyres   = new();
+    private readonly Dictionary<int,float>   engineT = new();
+    private readonly Dictionary<int,float>   overHot = new();
+    private readonly Dictionary<int,float>   lastBrake = new();
+    private readonly Random rng = new();
 
     private class Baseline
     {
-        public float TractionMax;
-        public float TractionMin;
+        public float TractionMax, TractionMin;
         public float? LowSpeedLoss;
     }
-    private readonly Dictionary<int,Baseline> baselines = new();
+    private readonly Dictionary<int,Baseline> baseH = new();
     private static readonly PropertyInfo? LowSpeedProp =
         typeof(HandlingData).GetProperty("LowSpeedTractionLossMult",
-                                         BindingFlags.Public | BindingFlags.Instance);
+                                         BindingFlags.Public|BindingFlags.Instance);
 
+    /* ─────────── CONSTRUCTOR ─────────── */
     public RealisticTyreWearAndTemperature()
     {
         Interval = 0;
         Tick    += OnTick;
-        Aborted += (_,__) => { tyreWear.Clear(); baselines.Clear(); };
-        Notification.PostTicker("Realistic Tyres & Temp ✔️", true);
+        Aborted += (_, __) => { tyres.Clear(); baseH.Clear(); };
+        Notification.PostTicker("Tyres & Temp 2.1-HF ✔️", true);
     }
 
-    private void OnTick(object? s, EventArgs e)
+    /* ─────────── MAIN LOOP ─────────── */
+    private void OnTick(object sender, EventArgs e)
     {
-        Ped ped = Game.Player.Character;
-        if (!ped.IsInVehicle()) return;
-        Vehicle v = ped.CurrentVehicle;
+        Ped p = Game.Player.Character;
+        if (!p.IsInVehicle()) return;
+        Vehicle v = p.CurrentVehicle;
         if (!v.Exists()) return;
 
-        int id = v.Handle;
-        float dt  = Game.LastFrameTime;
-        float kmh = v.Speed * 3.6f;
-        float m   = v.Speed * dt;
+        int id   = v.Handle;
+        float dt = Game.LastFrameTime;
+        float kmh= v.Speed * 3.6f;
+        float m  = v.Speed * dt;
 
-        // ——— baseline (si handling changé par un autre script)
-        var hdl = v.HandlingData;
-        if (!baselines.ContainsKey(id) ||
-            Math.Abs(hdl.TractionCurveMax - baselines[id].TractionMax) > 0.01f)
-        {
-            baselines[id] = new Baseline {
-                TractionMax = hdl.TractionCurveMax,
-                TractionMin = hdl.TractionCurveMin,
+        /* ----- Baseline handling ----- */
+        var h = v.HandlingData;
+        if (!baseH.ContainsKey(id))
+            baseH[id] = new Baseline {
+                TractionMax  = h.TractionCurveMax,
+                TractionMin  = h.TractionCurveMin,
                 LowSpeedLoss = LowSpeedProp is null ? null
-                              : (float?)LowSpeedProp.GetValue(hdl)
+                              : (float?)LowSpeedProp.GetValue(h)
             };
-            // on repart de zéro pour éviter le cumul
-            if (tyreWear.ContainsKey(id)) tyreWear[id] = 0f;
-        }
-        var baseH = baselines[id];
 
-        // ——— usure pneus (inactive à l’arrêt pour éviter “glisse fantôme”)
-        if (!tyreWear.ContainsKey(id)) tyreWear[id] = 0f;
-        float wear = tyreWear[id];
-        float wearStep = (kmh > 2f) ? m / (TyreLifetimeKm * 1000f) : 0f;
+        /* ----- Tyre wear ----- */
+        if (!tyres.ContainsKey(id)) tyres[id] = new float[4];
+        float[] wear = tyres[id];
 
         float brake = Function.Call<float>(Hash.GET_CONTROL_NORMAL, 0, 72);
         float accel = Function.Call<float>(Hash.GET_CONTROL_NORMAL, 0, 71);
         float deltaBrake = Math.Max(0f, brake - (lastBrake.TryGetValue(id, out var pb) ? pb : 0f));
         lastBrake[id] = brake;
 
-        wearStep += deltaBrake * WearBrakeBonus * dt;
-        if (accel > 0.8f && kmh < 15f) wearStep += WearBurnoutBonus * dt;
+        float wearStep = (kmh > 3f ? m / (TyreLifetimeKm * 1000f) : 0f)
+                         + deltaBrake * 0.0004f * dt;
+        if (accel > 0.8f && kmh < 25f) wearStep += WearBurnoutBonus * dt;
 
-        wear = Math.Min(1f, wear + wearStep);
-        tyreWear[id] = wear;
+        int[] wheels = { 0, 1, 4, 5 };
+        for (int i = 0; i < 4; i++)
+        {
+            bool burst = Function.Call<bool>(Hash.IS_VEHICLE_TYRE_BURST, v, wheels[i], false);
+            if (burst) { wear[i] = 1f; continue; }
 
-        float gripFactor = 1f - wear * WearGripLossFactor;
-        hdl.TractionCurveMax = baseH.TractionMax * gripFactor;
-        hdl.TractionCurveMin = baseH.TractionMin * gripFactor;
-        if (LowSpeedProp is not null && baseH.LowSpeedLoss is float origLoss)
-            LowSpeedProp.SetValue(hdl, origLoss * (1f + wear * 0.6f));
+            wear[i] = Math.Min(1f, wear[i] + wearStep);
 
-        // ——— température moteur (modèle simplifié réaliste)
-        if (!engineTemp.ContainsKey(id)) engineTemp[id] = AmbientT + 5f;
-        float T = engineTemp[id];
+            if (wear[i] >= BlowoutThreshold &&
+                rng.NextDouble() < RandomBlowoutChance * dt)
+                Function.Call(Hash.SET_VEHICLE_TYRE_BURST, v, wheels[i], true, 1000f);
+        }
+
+        /* Grip loss */
+        float avgWear = (wear[0] + wear[1] + wear[2] + wear[3]) * 0.25f;
+        h.TractionCurveMax = baseH[id].TractionMax * (1f - avgWear * 0.75f);
+        h.TractionCurveMin = baseH[id].TractionMin * (1f - avgWear * 0.75f);
+        if (LowSpeedProp is not null && baseH[id].LowSpeedLoss is float ls)
+            LowSpeedProp.SetValue(h, ls * (1f + avgWear * 0.7f));
+
+        /* ----- Engine Temp ----- */
+        if (!engineT.ContainsKey(id)) engineT[id] = AmbientT + 5f;
+        float T = engineT[id];
 
         if (v.IsEngineRunning)
         {
-            float heat =
-                IdleHeatPerSec +
-                accel * HeatAccelPerSec +
-                kmh * HeatSpeedPerKmh -
-                kmh * CoolSpeedPerKmh;              // refroidissement dynamique
+            float heat = 0.06f + accel * 0.26f + kmh * 0.0024f - kmh * 0.0015f;
             T += heat * dt;
         }
         else
-        {
-            T -= CoolEngineOff * dt;
-        }
+            T -= 0.22f * dt;
+
         T = Math.Max(AmbientT, T);
-        engineTemp[id] = T;
+        engineT[id] = T;
 
         if (T > OverheatT)
-            v.EngineHealth -= OverheatDmgPerSec * (T - OverheatT) / 10f * dt;
+            v.EngineHealth -= 3f * (T - OverheatT) / 10f * dt;
 
         if (T >= CriticalT)
         {
-            overTimer[id] = overTimer.TryGetValue(id,out var t) ? t + dt : dt;
-            if (overTimer[id] >= CriticalTimeToFire && !v.IsOnFire)
+            overHot[id] = overHot.TryGetValue(id, out var t) ? t + dt : dt;
+            if (overHot[id] > 5f && !v.IsOnFire)
                 Function.Call(Hash.START_ENTITY_FIRE, v);
         }
-        else if (overTimer.ContainsKey(id)) overTimer[id] = 0f;
+        else if (overHot.ContainsKey(id)) overHot[id] = 0f;
 
-        // ——— HUD
-        DrawTyreHUD(wear);
-        DrawTempHUD(T);
+        /* ----- HUD ----- */
+        DrawTyreSquares(wear);
+        DrawTempText(T);
     }
 
-    // ————————— affichage
-    private static void DrawTyreHUD(float wear)
+    /* ─────────── HUD HELPERS ─────────── */
+    private static readonly float MiniX = 0.142f; // gauche mini-map
+    private static readonly float BaseY = 0.90f;
+    private static readonly float Sq    = 0.020f;
+    private static readonly float Gap   = 0.004f;
+
+    private static void DrawTyreSquares(float[] w)
     {
-        float pct = (1f - wear) * 100f;
-        Color c   = pct switch { <=20=>Color.Red, <=50=>Color.Orange, _=>Color.White };
-        DrawText($"Pneus : {pct:0} %", 0.18f, 0.795f, c);
+        for (int i = 0; i < 4; i++)
+        {
+            float x = MiniX + i * (Sq + Gap);
+            Color c;
+            bool burst = w[i] >= 1f;
+            if      (burst)      c = Color.Red;
+            else if (w[i] >= .8) c = Color.Orange;
+            else if (w[i] >= .5) c = Color.Yellow;
+            else                 c = Color.Lime;
+
+            Function.Call(Hash.DRAW_RECT, x + Sq * .5f, BaseY, Sq, Sq,
+                          c.R, c.G, c.B, 220);
+            Function.Call(Hash.DRAW_RECT, x + Sq * .5f, BaseY, Sq * .9f, Sq * .9f,
+                          0, 0, 0, 40); // léger contour ombré
+        }
     }
-    private static void DrawTempHUD(float T)
+
+    private static readonly TextElement TempTxt =
+        new("", new PointF(0, 0), 0.35f, Color.White,
+            GTA.UI.Font.Pricedown, Alignment.Left);
+
+    private static void DrawTempText(float T)
     {
-        Color c = T switch { <=NormalT=>Color.White, <=OverheatT=>Color.Orange, _=>Color.Red };
-        DrawText($"Moteur : {T:0} °C", 0.18f, 0.885f, c);
-    }
-    private static void DrawText(string txt,float x,float y,Color c)
-    {
-        Function.Call(Hash.SET_TEXT_FONT,4);
-        Function.Call(Hash.SET_TEXT_SCALE,0.40f,0.40f);
-        Function.Call(Hash.SET_TEXT_COLOUR,c.R,c.G,c.B,255);
-        Function.Call(Hash.SET_TEXT_OUTLINE);
-        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT,"STRING");
-        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME,txt);
-        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT,x,y);
+        Color c = T switch
+        {
+            <= NormalT   => Color.Cyan,
+            <= OverheatT => Color.Yellow,
+            _            => Color.Red
+        };
+        TempTxt.Caption = $"ENG {T:0}°C";
+        TempTxt.Color   = c;
+
+        float x = 0.79f * Screen.Width;
+        float y = 0.885f * Screen.Height;
+        TempTxt.Position = new PointF(x, y);
+        TempTxt.Draw();
     }
 }
