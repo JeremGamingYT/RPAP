@@ -5,6 +5,7 @@ using GTA.UI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows.Forms;
 
 namespace REALIS.UrbanLife
 {
@@ -18,12 +19,14 @@ namespace REALIS.UrbanLife
         private List<RoadEvent> activeRoadEvents;
         private DateTime lastEventCheck;
         private DateTime lastEventCreation;
+        private DateTime lastInteractionCheck;
         
         // Configuration
         private const float EVENT_CREATION_DISTANCE_MIN = 80.0f;
         private const float EVENT_CREATION_DISTANCE_MAX = 200.0f;
         private const float EVENT_CLEANUP_DISTANCE = 300.0f;
-        private const double BASE_EVENT_PROBABILITY = 0.002f; // 0.2% par vérification
+        private const double BASE_EVENT_PROBABILITY = 0.05f; // 5% par vérification (augmenté de 0.2%)
+        private const float INTERACTION_DISTANCE = 5.0f; // Distance pour interagir avec les pannes
         
         public RoadEventManager()
         {
@@ -31,6 +34,7 @@ namespace REALIS.UrbanLife
             activeRoadEvents = new List<RoadEvent>();
             lastEventCheck = DateTime.Now;
             lastEventCreation = DateTime.Now;
+            lastInteractionCheck = DateTime.Now;
         }
         
         public void Update()
@@ -39,10 +43,17 @@ namespace REALIS.UrbanLife
             CleanupDistantEvents();
             
             // Créer de nouveaux événements
-            if ((DateTime.Now - lastEventCheck).TotalSeconds > 15) // Vérifier toutes les 15 secondes
+            if ((DateTime.Now - lastEventCheck).TotalSeconds > 5) // Vérifier toutes les 5 secondes (réduit de 15)
             {
                 CheckForNewRoadEvents();
                 lastEventCheck = DateTime.Now;
+            }
+            
+            // Vérifier les interactions avec les pannes
+            if ((DateTime.Now - lastInteractionCheck).TotalSeconds > 1) // Vérifier toutes les secondes
+            {
+                CheckBreakdownInteractions();
+                lastInteractionCheck = DateTime.Now;
             }
             
             // Mettre à jour les événements actifs
@@ -57,12 +68,12 @@ namespace REALIS.UrbanLife
                 if (player?.CurrentVehicle == null) return; // Seulement quand le joueur conduit
                 
                 // Limiter le nombre d'événements actifs
-                if (activeRoadEvents.Count >= 2) return;
+                if (activeRoadEvents.Count >= 3) return; // Augmenté de 2 à 3
                 
-                // Délai minimum entre événements
-                if ((DateTime.Now - lastEventCreation).TotalMinutes < 5) return;
+                // Délai minimum entre événements réduit
+                if ((DateTime.Now - lastEventCreation).TotalMinutes < 1) return; // Réduit de 5 à 1 minute
                 
-                // Test de probabilité
+                // Test de probabilité amélioré
                 if (random.NextDouble() < BASE_EVENT_PROBABILITY)
                 {
                     CreateRandomRoadEvent();
@@ -80,8 +91,8 @@ namespace REALIS.UrbanLife
             var eventTypes = Enum.GetValues(typeof(RoadEventType)).Cast<RoadEventType>().ToList();
             var selectedType = eventTypes[random.Next(eventTypes.Count)];
             
-            // Trouver une position sur une route
-            var eventPosition = FindSuitableRoadPosition();
+            // Trouver une position sur une route devant le joueur
+            var eventPosition = FindSuitableRoadPositionAhead();
             if (eventPosition == Vector3.Zero) return;
             
             switch (selectedType)
@@ -107,34 +118,139 @@ namespace REALIS.UrbanLife
             }
         }
         
-        private Vector3 FindSuitableRoadPosition()
+        private Vector3 FindSuitableRoadPositionAhead()
         {
             var player = Game.Player.Character;
             var playerPos = player.Position;
             
-            // Essayer plusieurs fois de trouver une position sur une route
-            for (int attempt = 0; attempt < 10; attempt++)
+            // Priorité à la direction devant le joueur (en voiture)
+            Vector3 playerForward = Vector3.Zero;
+            if (player.CurrentVehicle != null)
             {
-                var direction = Vector3.RandomXY().Normalized;
-                var distance = random.Next((int)EVENT_CREATION_DISTANCE_MIN, (int)EVENT_CREATION_DISTANCE_MAX);
+                playerForward = player.CurrentVehicle.ForwardVector;
+            }
+            else
+            {
+                playerForward = player.ForwardVector;
+            }
+            
+            // Essayer plusieurs positions devant le joueur d'abord
+            for (int attempt = 0; attempt < 15; attempt++)
+            {
+                Vector3 direction;
+                float distance;
+                
+                if (attempt < 8) // 8 premiers essais : devant le joueur
+                {
+                    // Angle léger par rapport à la direction du joueur (-30° à +30°)
+                    float angle = ((float)random.NextDouble() - 0.5f) * 60.0f; // -30 à +30 degrés
+                    
+                    // Rotation manuelle autour de l'axe Z
+                    float angleRad = (float)(angle * Math.PI / 180.0);
+                    float cos = (float)Math.Cos(angleRad);
+                    float sin = (float)Math.Sin(angleRad);
+                    
+                    var rotatedForward = new Vector3(
+                        playerForward.X * cos - playerForward.Y * sin,
+                        playerForward.X * sin + playerForward.Y * cos,
+                        playerForward.Z
+                    );
+                    
+                    direction = rotatedForward.Normalized;
+                    distance = random.Next(100, 250); // Plus proche pour être visible
+                }
+                else // Autres essais : positions aléatoires
+                {
+                    direction = Vector3.RandomXY().Normalized;
+                    distance = random.Next((int)EVENT_CREATION_DISTANCE_MIN, (int)EVENT_CREATION_DISTANCE_MAX);
+                }
+                
                 var testPos = playerPos + (direction * distance);
                 
-                // Vérifier que c'est sur une route
+                // Vérifier que c'est sur une route avec une logique améliorée
                 float groundZ;
                 if (World.GetGroundHeight(testPos, out groundZ))
                 {
-                    testPos.Z = groundZ;
+                    testPos.Z = groundZ + 1.0f; // Légèrement au-dessus du sol
                     
-                    // Vérifier si c'est près d'une route
-                    var nearbyVehicles = World.GetNearbyVehicles(testPos, 50.0f);
-                    if (nearbyVehicles.Length > 2) // S'il y a du trafic, c'est probablement une route
+                    // Méthode améliorée : d'abord vérifier si c'est déjà sur une route
+                    if (IsValidRoadPosition(testPos))
                     {
                         return testPos;
+                    }
+                    
+                    // Si pas sur route, forcer le positionnement sur la route la plus proche
+                    var roadPos = ForceRoadPosition(testPos);
+                    if (roadPos != testPos && IsValidRoadPosition(roadPos))
+                    {
+                        return roadPos;
                     }
                 }
             }
             
             return Vector3.Zero; // Échec
+        }
+        
+        private bool IsValidRoadPosition(Vector3 position)
+        {
+            try
+            {
+                // Méthode 1: Utiliser GET_CLOSEST_VEHICLE_NODE pour trouver une route proche
+                Vector3 nodePosition = Vector3.Zero;
+                if (GTA.Native.Function.Call<bool>(GTA.Native.Hash.GET_CLOSEST_VEHICLE_NODE, 
+                    position.X, position.Y, position.Z, 1, 3.0f, 0))
+                {
+                    // Si on trouve un nœud proche, c'est probablement une route
+                    return true;
+                }
+                
+                // Méthode 2: Utiliser IS_POINT_ON_ROAD avec une tolérance plus large
+                bool isOnRoad = GTA.Native.Function.Call<bool>(GTA.Native.Hash.IS_POINT_ON_ROAD, position.X, position.Y, position.Z, 0);
+                if (isOnRoad)
+                {
+                    return true;
+                }
+                
+                // Méthode 3: Vérifier le trafic dans la zone (réduit le rayon)
+                var nearbyVehicles = World.GetNearbyVehicles(position, 50.0f);
+                if (nearbyVehicles.Length >= 1)
+                {
+                    return true;
+                }
+                
+                return false;
+            }
+            catch
+            {
+                // En cas d'erreur, rejeter la position
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Force le positionnement sur une route proche en utilisant GET_CLOSEST_VEHICLE_NODE
+        /// </summary>
+        private Vector3 ForceRoadPosition(Vector3 originalPosition)
+        {
+            try
+            {
+                Vector3 roadPosition = Vector3.Zero;
+                
+                // Utiliser GET_CLOSEST_VEHICLE_NODE plus simple
+                var result = GTA.Native.Function.Call<Vector3>(GTA.Native.Hash.GET_CLOSEST_VEHICLE_NODE,
+                    originalPosition.X, originalPosition.Y, originalPosition.Z, 1, 10.0f, 0);
+                
+                if (result != Vector3.Zero)
+                {
+                    return result;
+                }
+                
+                return originalPosition; // Si échec, retourner la position originale
+            }
+            catch
+            {
+                return originalPosition;
+            }
         }
         
         private void CreatePoliceStopEvent(Vector3 position)
@@ -245,7 +361,7 @@ namespace REALIS.UrbanLife
                 
                 activeRoadEvents.Add(roadEvent);
                 
-                AddRoadEventBlip(roadEvent, "Accident de la route", BlipSprite.Devin, BlipColor.Red);
+                AddRoadEventBlip(roadEvent, "Accident de circulation", BlipSprite.Devin, BlipColor.Red);
                 
                 lastEventCreation = DateTime.Now;
                 GTA.UI.Notification.PostTicker("~r~Accident de la route repéré", false);
@@ -428,9 +544,15 @@ namespace REALIS.UrbanLife
             var blip = World.CreateBlip(roadEvent.Position);
             blip.Sprite = sprite;
             blip.Color = color;
-            blip.Scale = 0.6f;
+            blip.Scale = 0.8f;
             blip.Name = name;
-            blip.IsShortRange = true;
+            blip.IsShortRange = false;
+            blip.IsFlashing = true;
+            
+            if (roadEvent.Type == RoadEventType.TrafficAccident || roadEvent.Type == RoadEventType.Paramedics)
+            {
+                blip.ShowRoute = true;
+            }
             
             roadEvent.Blip = blip;
         }
@@ -444,6 +566,14 @@ namespace REALIS.UrbanLife
                 
                 // Supprimer les événements anciens (10 minutes)
                 if (elapsedTime.TotalMinutes > 10)
+                {
+                    CleanupRoadEvent(roadEvent);
+                    activeRoadEvents.RemoveAt(i);
+                    continue;
+                }
+                
+                // Supprimer les événements marqués pour suppression (phase 95, 4, 5)
+                if (roadEvent.Phase >= 95 || roadEvent.Phase == 4 || roadEvent.Phase == 5)
                 {
                     CleanupRoadEvent(roadEvent);
                     activeRoadEvents.RemoveAt(i);
@@ -557,14 +687,38 @@ namespace REALIS.UrbanLife
             var driver = roadEvent.Participants[0];
             if (!driver.Exists()) return;
             
+            // Gérer la réparation en cours (sécurisé)
+            if (roadEvent.IsBeingRepaired)
+            {
+                var repairElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                if (repairElapsed.TotalSeconds >= 5.0) // 5 secondes de réparation
+                {
+                    CompleteVehicleRepair(roadEvent);
+                    return; // L'événement sera nettoyé
+                }
+            }
+            
+            // Gérer l'arrivée de la dépanneuse (sécurisé)
+            if (roadEvent.TowingCalled && roadEvent.TowingArrivalTime.HasValue)
+            {
+                if (DateTime.Now >= roadEvent.TowingArrivalTime.Value)
+                {
+                    SpawnTowTruckSafe(roadEvent);
+                    roadEvent.TowingArrivalTime = null; // Éviter de respawner
+                }
+            }
+            
             switch (roadEvent.Phase)
             {
                 case 1: // Inspection du véhicule
                     if (elapsedTime.TotalSeconds > 3)
                     {
                         // Aller vers le capot
-                        var hood = roadEvent.Vehicles[0].Position + roadEvent.Vehicles[0].ForwardVector * 3.0f;
-                        driver.Task.FollowNavMeshTo(hood);
+                        if (roadEvent.Vehicles.Count > 0 && roadEvent.Vehicles[0].Exists())
+                        {
+                            var hood = roadEvent.Vehicles[0].Position + roadEvent.Vehicles[0].ForwardVector * 3.0f;
+                            driver.Task.FollowNavMeshTo(hood);
+                        }
                         roadEvent.Phase = 2;
                     }
                     break;
@@ -576,6 +730,175 @@ namespace REALIS.UrbanLife
                         roadEvent.Phase = 3;
                     }
                     break;
+                case 90: // Phase dépanneuse arrivée
+                    var depanElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                    if (depanElapsed.TotalSeconds > 10) // 10 secondes de préparation
+                    {
+                        // Simulation du remorquage
+                        GTA.UI.Notification.PostTicker("~b~Le véhicule en panne est chargé sur la dépanneuse...", false);
+                        
+                        // Le conducteur en panne monte avec la dépanneuse
+                        if (roadEvent.TowTruck?.Exists() == true)
+                        {
+                            driver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Passenger);
+                        }
+                        
+                        roadEvent.Phase = 91;
+                        roadEvent.RepairStartTime = DateTime.Now; // Reset timer
+                    }
+                    break;
+                case 91: // Chargement du véhicule
+                    var chargeElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                    if (chargeElapsed.TotalSeconds > 5)
+                    {
+                        // Faire disparaître le véhicule en panne
+                        if (roadEvent.Vehicles.Count > 0 && roadEvent.Vehicles[0].Exists())
+                        {
+                            roadEvent.Vehicles[0].Delete();
+                        }
+                        
+                        // Le conducteur de dépanneuse repart
+                        if (roadEvent.Participants.Count > 1 && roadEvent.TowTruck?.Exists() == true)
+                        {
+                            var towDriver = roadEvent.Participants[1]; // Le dépanneur est le 2ème participant
+                            towDriver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Driver);
+                        }
+                        
+                        roadEvent.Phase = 92;
+                        roadEvent.RepairStartTime = DateTime.Now; // Reset timer
+                    }
+                    break;
+                case 92: // Départ de la dépanneuse
+                    var departElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                    if (departElapsed.TotalSeconds > 3)
+                    {
+                        if (roadEvent.Participants.Count > 1 && roadEvent.TowTruck?.Exists() == true)
+                        {
+                            var towDriver = roadEvent.Participants[1];
+                            if (towDriver.IsInVehicle())
+                            {
+                                Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, towDriver, roadEvent.TowTruck, 20.0f, 786603);
+                            }
+                        }
+                        
+                        roadEvent.Blip?.Delete();
+                        roadEvent.Phase = 95; // Marqué pour suppression
+                        GTA.UI.Notification.PostTicker("~b~Véhicule remorqué avec succès!", false);
+                    }
+                    break;
+                case 99: // Départ après réparation
+                    var reparElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                    if (reparElapsed.TotalSeconds > 3 && roadEvent.Vehicles.Count > 0)
+                    {
+                        if (driver.IsInVehicle())
+                        {
+                            Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, driver, roadEvent.Vehicles[0], 20.0f, 786603);
+                        }
+                        roadEvent.Phase = 95; // Marqué pour suppression
+                    }
+                    break;
+                case 80: // Transport de passager
+                    var transportElapsed = DateTime.Now - roadEvent.RepairStartTime;
+                    if (transportElapsed.TotalSeconds > 30) // 30 secondes de trajet
+                    {
+                        if (driver?.Exists() == true && driver.IsInVehicle())
+                        {
+                            driver.Task.LeaveVehicle();
+                            GTA.UI.Notification.PostTicker("~g~Le passager vous remercie et descend!", false);
+                        }
+                        roadEvent.Phase = 95; // Marqué pour suppression
+                    }
+                    break;
+            }
+        }
+        
+        /// <summary>
+        /// Complète la réparation du véhicule de manière sécurisée
+        /// </summary>
+        private void CompleteVehicleRepair(RoadEvent breakdownEvent)
+        {
+            try
+            {
+                if (breakdownEvent.Vehicles.Count == 0) return;
+                
+                var brokenVehicle = breakdownEvent.Vehicles[0];
+                if (!brokenVehicle.Exists()) return;
+                
+                // Réparer le véhicule
+                brokenVehicle.Repair();
+                brokenVehicle.EngineHealth = 1000.0f;
+                brokenVehicle.HealthFloat = 1000.0f;
+                
+                // Le conducteur remonte et repart
+                if (breakdownEvent.Participants.Count > 0)
+                {
+                    var driver = breakdownEvent.Participants[0];
+                    if (driver?.Exists() == true)
+                    {
+                        driver.Task.EnterVehicle(brokenVehicle, VehicleSeat.Driver);
+                        // Programmer le départ dans 3 secondes via la phase
+                        breakdownEvent.Phase = 99; // Phase spéciale pour départ après réparation
+                        breakdownEvent.RepairStartTime = DateTime.Now; // Réutiliser pour timer le départ
+                    }
+                }
+                
+                breakdownEvent.IsRepaired = true;
+                breakdownEvent.IsBeingRepaired = false;
+                breakdownEvent.Blip?.Delete();
+                
+                GTA.UI.Notification.PostTicker("~g~Véhicule réparé! Le conducteur vous remercie.", false);
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker($"~r~Erreur réparation: {ex.Message}", false);
+            }
+        }
+
+        /// <summary>
+        /// Fait apparaître la dépanneuse de manière sécurisée
+        /// </summary>
+        private void SpawnTowTruckSafe(RoadEvent breakdownEvent)
+        {
+            try
+            {
+                if (breakdownEvent.Vehicles.Count == 0) return;
+                
+                var brokenVehicle = breakdownEvent.Vehicles[0];
+                if (!brokenVehicle.Exists()) return;
+                
+                // Position pour la dépanneuse (derrière le véhicule en panne)
+                var towTruckPos = brokenVehicle.Position + (brokenVehicle.ForwardVector * -15.0f);
+                
+                // Créer la dépanneuse
+                var towTruck = World.CreateVehicle(VehicleHash.TowTruck, towTruckPos);
+                if (towTruck?.Exists() != true) return;
+                
+                // Créer le conducteur de dépanneuse
+                var towDriver = towTruck.CreatePedOnSeat(VehicleSeat.Driver, PedHash.Autoshop01SMM);
+                if (towDriver?.Exists() != true)
+                {
+                    towTruck?.Delete();
+                    return;
+                }
+                
+                towTruck.IsPersistent = true;
+                towDriver.IsPersistent = true;
+                
+                breakdownEvent.TowTruck = towTruck;
+                breakdownEvent.Participants.Add(towDriver); // Ajouter le dépanneur aux participants
+                
+                GTA.UI.Notification.PostTicker("~b~La dépanneuse est arrivée!", false);
+                
+                // Faire sortir le conducteur et commencer le remorquage
+                towDriver.Task.LeaveVehicle();
+                
+                // Programmer la séquence de remorquage via les phases
+                breakdownEvent.Phase = 90; // Phase spéciale pour dépanneuse
+                breakdownEvent.RepairStartTime = DateTime.Now; // Réutiliser pour timer les phases
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker($"~r~Erreur dépanneuse: {ex.Message}", false);
             }
         }
         
@@ -677,6 +1000,638 @@ namespace REALIS.UrbanLife
         {
             return activeRoadEvents.ToList();
         }
+        
+        /// <summary>
+        /// Force la création d'un événement routier (utilisé par F7)
+        /// </summary>
+        public bool ForceCreateRoadEvent()
+        {
+            try
+            {
+                var player = Game.Player.Character;
+                if (player?.CurrentVehicle == null) 
+                {
+                    GTA.UI.Notification.PostTicker("~r~Vous devez être dans un véhicule!", false);
+                    return false;
+                }
+                
+                // NOUVELLE VÉRIFICATION : Vitesse excessive
+                var playerVehicle = player.CurrentVehicle;
+                var speed = playerVehicle.Speed * 3.6f; // Convertir en km/h
+                if (speed > 120.0f) // Plus de 120 km/h
+                {
+                    GTA.UI.Notification.PostTicker("~r~Ralentissez avant de créer un événement! (vitesse max: 120 km/h)", false);
+                    return false;
+                }
+                
+                // NOUVELLE VÉRIFICATION : État du véhicule
+                if (playerVehicle.HealthFloat < 500.0f)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Votre véhicule est trop endommagé!", false);
+                    return false;
+                }
+                
+                // Vérifier qu'on n'est pas dans l'eau ou dans une zone interdite
+                var playerPos = player.Position;
+                if (playerPos.Z < -50.0f || playerPos.Z > 500.0f)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Position invalide pour créer un événement!", false);
+                    return false;
+                }
+                
+                // Vérifier l'eau avec plus de sécurité
+                try
+                {
+                    float waterHeight = 0.0f;
+                    if (Function.Call<bool>(Hash.GET_WATER_HEIGHT, playerPos.X, playerPos.Y, playerPos.Z, waterHeight))
+                    {
+                        if (Math.Abs(playerPos.Z - waterHeight) < 5.0f) // Proche de l'eau
+                        {
+                            GTA.UI.Notification.PostTicker("~r~Impossible de créer un événement près de l'eau!", false);
+                            return false;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Si la vérification d'eau échoue, on continue mais on sera plus prudent
+                    GTA.UI.Notification.PostTicker("~y~Attention: Vérification d'eau impossible", false);
+                }
+                
+                // Limiter le nombre d'événements actifs
+                if (activeRoadEvents.Count >= 2) // Réduire à 2 pour plus de sécurité
+                {
+                    GTA.UI.Notification.PostTicker("~y~Trop d'événements actifs! Attendez qu'ils se terminent.", false);
+                    return false;
+                }
+                
+                // NOUVELLE VÉRIFICATION : Délai minimum entre créations F7
+                var timeSinceLastEvent = DateTime.Now - lastEventCreation;
+                if (timeSinceLastEvent.TotalSeconds < 15) // 15 secondes minimum
+                {
+                    var remainingTime = 15 - (int)timeSinceLastEvent.TotalSeconds;
+                    GTA.UI.Notification.PostTicker($"~y~Attendez {remainingTime}s avant le prochain événement F7", false);
+                    return false;
+                }
+                
+                // Essayer de trouver une position sécurisée avec plus de sécurité
+                Vector3 eventPosition = Vector3.Zero;
+                try
+                {
+                    eventPosition = FindSafeRoadPositionAheadUltraSafe();
+                }
+                catch (Exception ex)
+                {
+                    GTA.UI.Notification.PostTicker($"~r~Erreur recherche position: {ex.Message}", false);
+                    return false;
+                }
+                
+                if (eventPosition == Vector3.Zero) 
+                {
+                    GTA.UI.Notification.PostTicker("~y~Aucune route sûre trouvée devant vous. Ralentissez et réessayez.", false);
+                    return false;
+                }
+                
+                // SEULEMENT le type le plus sûr à haute vitesse
+                var eventType = RoadEventType.BrokenDownVehicle; // Le plus simple et sûr
+                if (speed < 50.0f) // Seulement en dessous de 50 km/h, autoriser les autres types
+                {
+                    var safeEventTypes = new[] 
+                    { 
+                        RoadEventType.BrokenDownVehicle, 
+                        RoadEventType.PoliceStop
+                    };
+                    eventType = safeEventTypes[random.Next(safeEventTypes.Length)];
+                }
+                
+                // Créer l'événement selon le type avec sécurité renforcée
+                bool success = false;
+                try
+                {
+                    switch (eventType)
+                    {
+                        case RoadEventType.PoliceStop:
+                            success = CreatePoliceStopEventUltraSafe(eventPosition);
+                            break;
+                        case RoadEventType.BrokenDownVehicle:
+                            success = CreateBrokenDownVehicleEventUltraSafe(eventPosition);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GTA.UI.Notification.PostTicker($"~r~Erreur création événement: {ex.Message}", false);
+                    return false;
+                }
+                
+                if (success)
+                {
+                    lastEventCreation = DateTime.Now;
+                    GTA.UI.Notification.PostTicker("~g~Mini-événement créé avec succès!", false);
+                    return true;
+                }
+                else
+                {
+                    GTA.UI.Notification.PostTicker("~r~Échec de création de l'événement!", false);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker($"~r~Erreur F7 critique: {ex.Message}", false);
+                // Log pour debug
+                System.IO.File.AppendAllText("REALIS_crash_log.txt", 
+                    $"{DateTime.Now}: F7 Error - {ex.Message}\n{ex.StackTrace}\n\n");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Version ultra-sécurisée de la recherche de position routière
+        /// </summary>
+        private Vector3 FindSafeRoadPositionAheadUltraSafe()
+        {
+            try
+            {
+                var player = Game.Player.Character;
+                var playerPos = player.Position;
+                
+                // Vérifications de sécurité initiales renforcées
+                if (playerPos.Z < -200.0f || playerPos.Z > 2000.0f) 
+                {
+                    throw new Exception("Position joueur hors limites extrêmes");
+                }
+                
+                Vector3 playerForward = Vector3.Zero;
+                if (player.CurrentVehicle?.Exists() == true)
+                {
+                    playerForward = player.CurrentVehicle.ForwardVector;
+                }
+                else
+                {
+                    playerForward = player.ForwardVector;
+                }
+                
+                // Vérifier que le vecteur forward est valide
+                if (playerForward.LengthSquared() < 0.1f)
+                {
+                    playerForward = new Vector3(1, 0, 0); // Direction par défaut
+                }
+                
+                // Distances plus courtes et plus sûres
+                var distances = new[] { 30.0f, 40.0f, 50.0f, 60.0f, 70.0f };
+                var angles = new[] { 0.0f, -10.0f, 10.0f, -20.0f, 20.0f };
+                
+                foreach (var distance in distances)
+                {
+                    foreach (var angle in angles)
+                    {
+                        try
+                        {
+                            // Calculer la direction avec rotation sécurisée
+                            float angleRad = (float)(angle * Math.PI / 180.0);
+                            float cos = (float)Math.Cos(angleRad);
+                            float sin = (float)Math.Sin(angleRad);
+                            
+                            var rotatedForward = new Vector3(
+                                playerForward.X * cos - playerForward.Y * sin,
+                                playerForward.X * sin + playerForward.Y * cos,
+                                playerForward.Z
+                            );
+                            
+                            // Normaliser avec vérification
+                            if (rotatedForward.LengthSquared() > 0.1f)
+                            {
+                                rotatedForward = rotatedForward.Normalized;
+                            }
+                            else
+                            {
+                                continue; // Passer à l'essai suivant si vecteur invalide
+                            }
+                            
+                            var testPos = playerPos + (rotatedForward * distance);
+                            
+                            // Vérifications de sécurité ultra-strictes
+                            if (IsSafePositionUltraSafe(testPos))
+                            {
+                                return testPos;
+                            }
+                        }
+                        catch
+                        {
+                            // Ignorer cet essai et continuer
+                            continue;
+                        }
+                    }
+                }
+                
+                return Vector3.Zero; // Aucune position sûre trouvée
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"FindSafeRoadPositionAheadUltraSafe failed: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Vérifications de sécurité ultra-strictes pour une position
+        /// </summary>
+        private bool IsSafePositionUltraSafe(Vector3 position)
+        {
+            try
+            {
+                // Vérifier les coordonnées de base avec marges plus strictes
+                if (position.X < -5000.0f || position.X > 5000.0f) return false;
+                if (position.Y < -5000.0f || position.Y > 5000.0f) return false;
+                if (position.Z < -100.0f || position.Z > 1000.0f) return false;
+                
+                // Vérifier l'eau avec gestion d'erreur
+                try
+                {
+                    float waterHeight = 0.0f;
+                    if (Function.Call<bool>(Hash.GET_WATER_HEIGHT, position.X, position.Y, position.Z, waterHeight))
+                    {
+                        if (Math.Abs(position.Z - waterHeight) < 10.0f) return false;
+                    }
+                }
+                catch
+                {
+                    return false; // En cas d'erreur, rejeter la position
+                }
+                
+                // Obtenir la hauteur du sol avec gestion d'erreur
+                float groundZ;
+                try
+                {
+                    if (!World.GetGroundHeight(position, out groundZ)) return false;
+                    if (Math.Abs(position.Z - groundZ) > 50.0f) return false; // Pas trop loin du sol
+                }
+                catch
+                {
+                    return false;
+                }
+                
+                // Ajuster la position au sol
+                position.Z = groundZ + 2.0f; // Un peu plus haut pour sécurité
+                
+                // Vérifier qu'on est sur une route avec gestion d'erreur
+                try
+                {
+                    if (!Function.Call<bool>(Hash.IS_POINT_ON_ROAD, position.X, position.Y, position.Z, 0))
+                    {
+                        // Essayer de forcer sur une route proche
+                        var roadPos = Function.Call<Vector3>(Hash.GET_CLOSEST_VEHICLE_NODE,
+                            position.X, position.Y, position.Z, 1, 20.0f, 0);
+                        
+                        if (roadPos == Vector3.Zero) return false;
+                        
+                        // Vérifier que la position de route est valide
+                        if (roadPos.X < -5000.0f || roadPos.X > 5000.0f) return false;
+                        if (roadPos.Y < -5000.0f || roadPos.Y > 5000.0f) return false;
+                        if (roadPos.Z < -100.0f || roadPos.Z > 1000.0f) return false;
+                        
+                        position = roadPos;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+                
+                // Vérifier qu'il n'y a pas d'autres événements trop proches
+                foreach (var existingEvent in activeRoadEvents)
+                {
+                    try
+                    {
+                        if (position.DistanceTo(existingEvent.Position) < 50.0f) // Distance augmentée
+                            return false;
+                    }
+                    catch
+                    {
+                        continue; // Ignorer si erreur de calcul de distance
+                    }
+                }
+                
+                return true;
+            }
+            catch
+            {
+                return false; // En cas d'erreur, toujours rejeter
+            }
+        }
+        
+        /// <summary>
+        /// Version sécurisée de création d'événement de panne
+        /// </summary>
+        private bool CreateBrokenDownVehicleEventUltraSafe(Vector3 position)
+        {
+            try
+            {
+                // Vérifications préalables
+                if (!IsSafePositionUltraSafe(position)) return false;
+                
+                var brokenCar = World.CreateVehicle(VehicleHash.Asea, position);
+                if (brokenCar?.Exists() != true) 
+                {
+                    GTA.UI.Notification.PostTicker("~r~Échec création véhicule", false);
+                    return false;
+                }
+                
+                // Sécuriser le véhicule
+                brokenCar.IsPersistent = true;
+                brokenCar.EngineHealth = 0.0f;
+                brokenCar.HealthFloat = 600.0f;
+                
+                var driver = brokenCar.CreatePedOnSeat(VehicleSeat.Driver, PedHash.Business01AMY);
+                if (driver?.Exists() != true)
+                {
+                    brokenCar?.Delete();
+                    return false;
+                }
+                
+                driver.IsPersistent = true;
+                
+                // Faire sortir le conducteur SANS Task.Run asynchrone
+                driver.Task.LeaveVehicle();
+                
+                var roadEvent = new RoadEvent
+                {
+                    Type = RoadEventType.BrokenDownVehicle,
+                    Position = position,
+                    StartTime = DateTime.Now,
+                    Vehicles = new List<Vehicle> { brokenCar },
+                    Participants = new List<Ped> { driver },
+                    Phase = 1
+                };
+                
+                activeRoadEvents.Add(roadEvent);
+                AddRoadEventBlip(roadEvent, "Véhicule en panne", BlipSprite.Garage, BlipColor.Yellow);
+                
+                return true;
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker($"~r~Erreur panne sécurisée: {ex.Message}", false);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Version sécurisée de création de contrôle de police
+        /// </summary>
+        private bool CreatePoliceStopEventUltraSafe(Vector3 position)
+        {
+            try
+            {
+                if (!IsSafePositionUltraSafe(position)) return false;
+                
+                var civilCarModels = new[] { VehicleHash.Blista, VehicleHash.Premier, VehicleHash.Fugitive };
+                var civilCar = World.CreateVehicle(civilCarModels[random.Next(civilCarModels.Length)], position);
+                
+                if (civilCar?.Exists() != true) return false;
+                
+                var civilDriver = civilCar.CreatePedOnSeat(VehicleSeat.Driver, PedHash.Business01AMY);
+                if (civilDriver?.Exists() != true)
+                {
+                    civilCar?.Delete();
+                    return false;
+                }
+                
+                var policePos = position + new Vector3(0f, -8.0f, 0f);
+                var policeCar = World.CreateVehicle(VehicleHash.Police, policePos);
+                
+                if (policeCar?.Exists() != true) 
+                {
+                    civilCar?.Delete();
+                    civilDriver?.Delete();
+                    return false;
+                }
+                
+                var officer = policeCar.CreatePedOnSeat(VehicleSeat.Driver, PedHash.Cop01SMY);
+                if (officer?.Exists() != true)
+                {
+                    civilCar?.Delete();
+                    civilDriver?.Delete();
+                    policeCar?.Delete();
+                    return false;
+                }
+                
+                // Sécuriser tous les éléments
+                civilDriver.IsPersistent = true;
+                officer.IsPersistent = true;
+                civilCar.IsPersistent = true;
+                policeCar.IsPersistent = true;
+                
+                // Actions synchrones SANS Task.Run
+                civilDriver.Task.LeaveVehicle();
+                officer.Task.LeaveVehicle();
+                
+                var roadEvent = new RoadEvent
+                {
+                    Type = RoadEventType.PoliceStop,
+                    Position = position,
+                    StartTime = DateTime.Now,
+                    Vehicles = new List<Vehicle> { civilCar, policeCar },
+                    Participants = new List<Ped> { civilDriver, officer },
+                    Phase = 1
+                };
+                
+                activeRoadEvents.Add(roadEvent);
+                AddRoadEventBlip(roadEvent, "Contrôle de police", BlipSprite.PoliceOfficer, BlipColor.Blue);
+                
+                return true;
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker($"~r~Erreur police sécurisée: {ex.Message}", false);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Vérifie les interactions possibles avec les pannes
+        /// </summary>
+        private void CheckBreakdownInteractions()
+        {
+            var player = Game.Player.Character;
+            if (player == null) return;
+            
+            var breakdownEvents = activeRoadEvents.Where(re => 
+                re.Type == RoadEventType.BrokenDownVehicle && 
+                re.CanInteract && 
+                !re.IsRepaired && 
+                !re.PassengerPickedUp).ToList();
+            
+            foreach (var breakdownEvent in breakdownEvents)
+            {
+                var distance = player.Position.DistanceTo(breakdownEvent.Position);
+                if (distance <= INTERACTION_DISTANCE)
+                {
+                    ShowBreakdownInteractionOptions(breakdownEvent);
+                    break; // Une seule interaction à la fois
+                }
+            }
+            
+            // Vérifier l'arrivée des dépanneuses
+            CheckTowingArrivals();
+        }
+        
+        /// <summary>
+        /// Affiche les options d'interaction pour une panne
+        /// </summary>
+        private void ShowBreakdownInteractionOptions(RoadEvent breakdownEvent)
+        {
+            var messages = new List<string>
+            {
+                "~g~Options d'aide:",
+                "~w~E - Réparer le véhicule",
+                "~w~F - Appeler une dépanneuse",
+                "~w~G - Proposer de l'emmener"
+            };
+            
+            foreach (var message in messages)
+            {
+                GTA.UI.Notification.PostTicker(message, false);
+            }
+            
+            // Vérifier les touches
+            if (Game.IsKeyPressed(System.Windows.Forms.Keys.E))
+            {
+                RepairBrokenVehicle(breakdownEvent);
+            }
+            else if (Game.IsKeyPressed(System.Windows.Forms.Keys.F))
+            {
+                CallTowingService(breakdownEvent);
+            }
+            else if (Game.IsKeyPressed(System.Windows.Forms.Keys.G))
+            {
+                OfferRideToDriver(breakdownEvent);
+            }
+        }
+        
+        /// <summary>
+        /// Répare le véhicule en panne avec animation
+        /// </summary>
+        private void RepairBrokenVehicle(RoadEvent breakdownEvent)
+        {
+            var player = Game.Player.Character;
+            if (breakdownEvent.Vehicles.Count == 0) return;
+            
+            var brokenVehicle = breakdownEvent.Vehicles[0];
+            if (!brokenVehicle.Exists()) return;
+            
+            breakdownEvent.CanInteract = false;
+            
+            GTA.UI.Notification.PostTicker("~g~Vous réparez le véhicule...", false);
+            
+            // Animation de réparation
+            player.Task.PlayAnimation("mini@repair", "fixing_a_ped", 8.0f, 5000, AnimationFlags.None);
+            
+            // Programmer la fin de la réparation de manière SÉCURISÉE
+            breakdownEvent.RepairStartTime = DateTime.Now;
+            breakdownEvent.IsBeingRepaired = true;
+        }
+        
+        /// <summary>
+        /// Appelle un service de dépannage
+        /// </summary>
+        private void CallTowingService(RoadEvent breakdownEvent)
+        {
+            if (breakdownEvent.TowingCalled) return;
+            
+            breakdownEvent.TowingCalled = true;
+            breakdownEvent.TowingCallTime = DateTime.Now;
+            breakdownEvent.CanInteract = false;
+            
+            var arrivalTime = random.Next(1, 4); // 1-3 minutes
+            GTA.UI.Notification.PostTicker($"~b~Dépanneuse appelée! Arrivée dans ~{arrivalTime} minutes.", false);
+            
+            // Sauvegarder le temps d'arrivée prévu de manière sécurisée
+            breakdownEvent.TowingArrivalTime = DateTime.Now.AddMinutes(arrivalTime);
+        }
+        
+        /// <summary>
+        /// Propose d'emmener le conducteur
+        /// </summary>
+        private void OfferRideToDriver(RoadEvent breakdownEvent)
+        {
+            var player = Game.Player.Character;
+            if (player?.CurrentVehicle == null)
+            {
+                GTA.UI.Notification.PostTicker("~r~Vous devez être dans un véhicule pour proposer de l'emmener!", false);
+                return;
+            }
+            
+            if (breakdownEvent.Participants.Count == 0) return;
+            
+            var driver = breakdownEvent.Participants[0];
+            if (!driver.Exists()) return;
+            
+            // Vérifier s'il y a de la place dans le véhicule
+            var playerVehicle = player.CurrentVehicle;
+            var availableSeats = GetAvailableSeats(playerVehicle);
+            
+            if (availableSeats.Count == 0)
+            {
+                GTA.UI.Notification.PostTicker("~r~Pas de place disponible dans votre véhicule!", false);
+                return;
+            }
+            
+            breakdownEvent.CanInteract = false;
+            breakdownEvent.PassengerPickedUp = true;
+            
+            GTA.UI.Notification.PostTicker("~g~Le conducteur accepte votre aide et monte dans votre véhicule!", false);
+            
+            // Faire monter le conducteur
+            var seatToUse = availableSeats.First();
+            driver.Task.EnterVehicle(playerVehicle, seatToUse);
+            
+            // Marquer l'événement comme résolu mais programmer le débarquement
+            breakdownEvent.Blip?.Delete();
+            breakdownEvent.Phase = 80; // Phase spéciale pour transport de passager
+            breakdownEvent.RepairStartTime = DateTime.Now; // Réutiliser pour timer le transport
+        }
+        
+        /// <summary>
+        /// Obtient les sièges disponibles dans un véhicule
+        /// </summary>
+        private List<VehicleSeat> GetAvailableSeats(Vehicle vehicle)
+        {
+            var availableSeats = new List<VehicleSeat>();
+            var allSeats = new[] { VehicleSeat.Passenger, VehicleSeat.LeftRear, VehicleSeat.RightRear };
+            
+            foreach (var seat in allSeats)
+            {
+                if (vehicle.IsSeatFree(seat))
+                {
+                    availableSeats.Add(seat);
+                }
+            }
+            
+            return availableSeats;
+        }
+        
+        /// <summary>
+        /// Vérifie l'arrivée des dépanneuses programmées
+        /// </summary>
+        private void CheckTowingArrivals()
+        {
+            var towingEvents = activeRoadEvents.Where(re => 
+                re.TowingCalled && 
+                re.TowingCallTime.HasValue && 
+                re.TowTruck == null).ToList();
+            
+            foreach (var towingEvent in towingEvents)
+            {
+                // Vérification sécurisée pour éviter le warning nullable
+                if (towingEvent.TowingCallTime.HasValue)
+                {
+                    var elapsed = DateTime.Now - towingEvent.TowingCallTime.Value;
+                    // Cette vérification est maintenant gérée par la task asynchrone dans CallTowingService
+                    // Mais on pourrait ajouter une vérification de fallback ici si nécessaire
+                }
+            }
+        }
     }
     
     public class RoadEvent
@@ -688,6 +1643,17 @@ namespace REALIS.UrbanLife
         public List<Ped> Participants { get; set; } = new List<Ped>();
         public Blip? Blip { get; set; }
         public int Phase { get; set; } = 1;
+        
+        // Propriétés pour les interactions des pannes
+        public bool CanInteract { get; set; } = true;
+        public bool TowingCalled { get; set; } = false;
+        public DateTime? TowingCallTime { get; set; }
+        public Vehicle? TowTruck { get; set; }
+        public bool IsRepaired { get; set; } = false;
+        public bool PassengerPickedUp { get; set; } = false;
+        public DateTime RepairStartTime { get; set; }
+        public bool IsBeingRepaired { get; set; } = false;
+        public DateTime? TowingArrivalTime { get; set; }
     }
     
     public enum RoadEventType

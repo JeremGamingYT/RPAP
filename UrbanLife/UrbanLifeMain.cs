@@ -128,16 +128,18 @@ namespace REALIS.UrbanLife
                         var player = Game.Player.Character;
                         if (player?.CurrentVehicle != null)
                         {
-                            // Forcer la création d'un événement routier proche
-                            var eventTypes = new[] { "Contrôle de police", "Accident", "Travaux", "Radar", "Panne", "Ambulance" };
-                            var selectedType = eventTypes[random.Next(eventTypes.Length)];
+                            // Forcer immédiatement la création d'un événement routier
+                            bool eventCreated = roadEventManager.ForceCreateRoadEvent();
                             
-                            GTA.UI.Notification.PostTicker($"~b~Création d'un mini-événement: {selectedType}", false);
-                            
-                            // Force la création lors de la prochaine vérification
-                            var reflection = typeof(RoadEventManager).GetField("lastEventCreation", 
-                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                            reflection?.SetValue(roadEventManager, DateTime.Now.AddMinutes(-10));
+                            if (eventCreated)
+                            {
+                                GTA.UI.Notification.PostTicker("~g~Mini-événement routier créé devant vous!", false);
+                                GTA.UI.Screen.ShowSubtitle("~g~Regardez votre mini-map et roulez en avant!", 4000);
+                            }
+                            else
+                            {
+                                GTA.UI.Notification.PostTicker("~y~Impossible de créer un événement maintenant. Réessayez.", false);
+                            }
                         }
                         else
                         {
@@ -567,10 +569,36 @@ namespace REALIS.UrbanLife
             var nearestEvent = eventManager.GetNearestEvent(playerPos);
             var interventionScore = interventionSystem.GetInterventionScore();
             
+            // Informations sur les événements routiers
+            var activeRoadEvents = roadEventManager.GetActiveEvents();
+            
             GTA.UI.Notification.PostTicker($"~w~SmartNPCs: {smartNPCs.Count}/{maxSmartNPCs}", false);
             GTA.UI.Notification.PostTicker($"~w~Événements spontanés: {activeEvents.Count}", false);
+            GTA.UI.Notification.PostTicker($"~c~Événements routiers: {activeRoadEvents.Count}/3", false);
             GTA.UI.Notification.PostTicker($"~w~Score d'intervention: {interventionScore}", false);
             GTA.UI.Notification.PostTicker($"~w~Heure: {currentHour}h (Nuit: {IsNightTime(currentHour)})", false);
+            
+            // Informations sur le joueur et sa position pour les événements routiers
+            var player = Game.Player.Character;
+            if (player?.CurrentVehicle != null)
+            {
+                GTA.UI.Notification.PostTicker($"~g~Dans véhicule: {player.CurrentVehicle.LocalizedName}", false);
+                GTA.UI.Notification.PostTicker($"~g~Vitesse: {player.CurrentVehicle.Speed * 3.6f:F0} km/h", false);
+            }
+            else
+            {
+                GTA.UI.Notification.PostTicker("~y~À pied - pas d'événements routiers", false);
+            }
+            
+            // Afficher le plus proche événement routier
+            if (activeRoadEvents.Count > 0)
+            {
+                var nearestRoadEvent = activeRoadEvents
+                    .OrderBy(re => re.Position.DistanceTo(playerPos))
+                    .First();
+                var distance = nearestRoadEvent.Position.DistanceTo(playerPos);
+                GTA.UI.Notification.PostTicker($"~c~Événement routier proche: {nearestRoadEvent.Type} à {distance:F0}m", false);
+            }
             
             if (nearestEvent != null)
             {
@@ -582,7 +610,7 @@ namespace REALIS.UrbanLife
             }
             
             // Instructions pour les nouvelles touches
-            GTA.UI.Notification.PostTicker("~b~F10: Événement spontané | F11: Agression | F12: Bagarre", false);
+            GTA.UI.Notification.PostTicker("~b~F7: Événement routier | F10: Événement spontané | F11: Debug", false);
         }
         
         private void ShowInterventionTips(SpontaneousEvent eventObj)
