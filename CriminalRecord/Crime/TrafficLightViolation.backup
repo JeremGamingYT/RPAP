@@ -1,0 +1,1431 @@
+using GTA;
+using GTA.Native; // Required for Hash and Function.Call
+using GTA.Math;
+using GTA.UI; 
+using System;
+using System.Windows.Forms;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq; 
+using System.Drawing;
+
+public class TrafficLightViolation : Script 
+{
+    // --- Configuration (identique à NPCRoadRage) ---
+    private readonly TimeSpan _policeDispatchTimeoutDuration = TimeSpan.FromSeconds(300);
+    private readonly TimeSpan _policeExitVehicleTimeoutDuration = TimeSpan.FromSeconds(15);
+    private readonly TimeSpan _policeApproachTimeoutDuration = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _policeInteractionDialoguePauseDuration = TimeSpan.FromSeconds(3);
+    private readonly TimeSpan _policeDecisionPauseDuration = TimeSpan.FromSeconds(2);
+    private readonly TimeSpan _policeArrestSequenceDuration = TimeSpan.FromSeconds(8); 
+    private readonly TimeSpan _policeDepartureBoardingTimeoutDuration = TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _policeDepartureDriveAwayDuration = TimeSpan.FromSeconds(15);
+    private const int NumberOfPoliceOfficers = 2; 
+    private PedHash _policePedModel = PedHash.Cop01SMY;
+    private VehicleHash _policeVehicleModel = VehicleHash.Police;
+    private const float PoliceArrivalDistanceThreshold = 8.0f;
+    private const float OfficerApproachDistanceThreshold = 3.0f;
+    private const float MaxInteractionDistance = 40.0f; 
+    private const float PoliceDriveSpeed = 30.0f; 
+    private const float PolicePatrolSpeed = 20.0f; 
+    private const float OfficerApproachSpeed = 1.5f;
+
+    // --- Traffic Light Detection Configuration ---
+    private const float TrafficLightDetectionRadius = 20.0f;
+    private const float MinSpeedForViolation = 3.0f; // Vitesse minimale pour considérer une violation
+    private readonly TimeSpan _violationCooldownDuration = TimeSpan.FromSeconds(15); // Cooldown entre violations
+    private DateTime _lastViolationTime = DateTime.MinValue;
+
+    // --- Response Menu Configuration (identique) ---
+    private readonly string[] _responseOptions = new string[]
+    {
+        "I didn't see the light was red!",
+        "I was in a hurry, officer.",
+        "The light just turned red!",
+        "I have nothing to say.",
+        "This is harassment!"
+    };
+    private int _selectedResponseIndex = 0;
+    private bool _showingResponseMenu = false;
+
+    // --- State Fields (identiques à NPCRoadRage) ---
+    private Vector3 _violationLocation = Vector3.Zero; 
+    private enum PoliceDecision { None, ArrestPlayer, LetPlayerGo, GiveFine }
+    private PoliceDecision _currentPoliceDecision = PoliceDecision.None;
+
+    public static bool PoliceCalled = false; 
+    private bool _policeDispatched = false; 
+    private bool _policeArrived = false; 
+    private bool _policeInteractionActive = false; 
+    private int _policeInteractionStage = 0; 
+    private bool _makingPoliceDecision = false;
+
+    private Random _random = new Random();
+    private List<Ped> _respondingPolicePeds = new List<Ped>();
+    private Vehicle? _policeVehicle = null;
+    private string _playerResponse = string.Empty;
+
+    // Variables pour éviter les répétitions (identiques)
+    private bool _playerControlDisabled = false;
+    private bool _fineAlreadyGiven = false;
+    private bool _decisionMessageShown = false;
+    private DateTime _stateTimer;
+    
+    // Nouvelle variable pour optimiser la détection
+    private DateTime _lastDetectionCheck = DateTime.MinValue;
+
+    // Variables de navigation police (identiques)
+    private DateTime _lastPoliceRedirectionTime = DateTime.MinValue;
+    private Vector3 _lastPolicePosition = Vector3.Zero;
+    private DateTime _policeStuckStartTime = DateTime.MinValue;
+
+    private const float PoliceSpawnMinDistance = 60.0f;
+    private const float PoliceSpawnMaxDistance = 120.0f;
+    private const float PoliceStuckSpeedThreshold = 0.3f;
+    private const float PoliceProgressThreshold = 5.0f;
+    private const int MaxNavigationRetries = 2;
+    private const float ForceArrivalDistance = 50.0f;
+
+    private float _lastRecordedDistance = float.MaxValue;
+    private DateTime _lastProgressTime = DateTime.MinValue;
+    private int _navigationRetryCount = 0;
+    private DateTime _lastMenuDisplayTime = DateTime.MinValue;
+    private DateTime _lastOfficerTaskTime = DateTime.MinValue;
+    private Dictionary<int, DateTime> _officerLastTaskedTime = new Dictionary<int, DateTime>();
+
+    public TrafficLightViolation()
+    {
+        Tick += OnTick;
+        KeyDown += OnKeyDown; 
+        Log("TrafficLightViolation script loaded. Version 1.0 - Red Light Running Detection with Police Response.");
+    }
+
+    private void OnTick(object sender, EventArgs e)
+    {
+        Ped player = Game.Player.Character;
+
+        if (Game.IsCutsceneActive || player == null || !player.Exists() || player.IsDead)
+        {
+            if(_policeDispatched || _policeInteractionActive || _makingPoliceDecision) {
+                Log("Game state changed (cutscene/player dead). Forcing cleanup of active incident.");
+                FullResetOfScriptStates(); 
+            }
+            return;
+        }
+
+        // Gestion identique de la distance pendant l'interaction police
+        if ((_policeInteractionActive || _makingPoliceDecision) && _policeVehicle != null && _policeVehicle.Exists()) {
+            float distanceToViolation = player.Position.DistanceTo(_violationLocation);
+            float distanceToVehicle = player.Position.DistanceTo(_policeVehicle.Position);
+            
+            float distanceToNearestOfficer = float.MaxValue;
+            foreach (Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive))
+            {
+                float officerDistance = player.Position.DistanceTo(officer.Position);
+                if (officerDistance < distanceToNearestOfficer)
+                {
+                    distanceToNearestOfficer = officerDistance;
+                }
+            }
+            
+            bool tooFarFromViolation = distanceToViolation > MaxInteractionDistance * 1.5f;
+            bool tooFarFromVehicle = distanceToVehicle > MaxInteractionDistance * 2.0f;
+            bool tooFarFromOfficers = distanceToNearestOfficer > MaxInteractionDistance;
+            
+            if (tooFarFromViolation && tooFarFromVehicle && tooFarFromOfficers) {
+                Log($"Player moved too far during police interaction. Distances - Violation: {distanceToViolation:F2}, Vehicle: {distanceToVehicle:F2}, Nearest Officer: {distanceToNearestOfficer:F2}. Aborting.");
+                GTA.UI.Notification.PostTicker("You left the scene of the traffic violation.", false, false);
+                EndPoliceInteraction(false, true); 
+                return;
+            }
+        }
+
+        // Gestion des états de police (identique à NPCRoadRage)
+        if (PoliceCalled && !_policeDispatched && !_policeInteractionActive && !_makingPoliceDecision && !_policeArrived)
+        {
+            Log("PoliceCalled is true and police not yet dispatched. Initiating police response.");
+            Vector3 locationForPolice = (_violationLocation != Vector3.Zero) ? _violationLocation : player.Position;
+            DispatchPolice(locationForPolice);
+        }
+        else if (_policeDispatched && !_policeArrived && !_policeInteractionActive && !_makingPoliceDecision)
+        {
+            CheckPoliceArrival();
+        }
+        else if (_policeInteractionActive)
+        {
+            ProcessPoliceInteraction();
+        }
+        else if (_makingPoliceDecision)
+        {
+            ProcessPoliceDecisionOutcome();
+        }
+        else 
+        {
+            if (_policeDispatched || _policeArrived) {
+                 if((_policeDispatched || _policeArrived) && !PoliceCalled && !_makingPoliceDecision && !_policeInteractionActive) { 
+                    Log("Anomaly detected: Police dispatched/arrived but no incident active. Resetting.");
+                    FullResetOfScriptStates();
+                 }
+                 return;
+            }
+
+            // NOUVELLE LOGIQUE : Détection des violations de feux rouges
+            Vehicle playerVeh = player.CurrentVehicle; 
+            if (playerVeh == null) return; // Le joueur doit être dans un véhicule
+
+            // Vérifier le cooldown des violations
+            if (DateTime.Now < _lastViolationTime + _violationCooldownDuration) return;
+            
+            // OPTIMISATION: Ne vérifier la violation que toutes les 500ms pour éviter la surcharge
+            if (DateTime.Now < _lastDetectionCheck + TimeSpan.FromMilliseconds(500)) return;
+            _lastDetectionCheck = DateTime.Now;
+
+            // Détecter la violation de feu rouge
+            if (DetectRedLightViolation(player, playerVeh))
+            {
+                Log($"RED LIGHT VIOLATION detected at {player.Position}! Player speed: {playerVeh.Speed:F2}");
+                
+                FullResetOfScriptStates(); 
+
+                _violationLocation = player.Position; 
+                _lastViolationTime = DateTime.Now;
+                _stateTimer = DateTime.Now; 
+
+                // Directement appeler la police (pas de NPC intermédiaire)
+                PoliceCalled = true;
+                
+                Log($"Traffic light violation at: {_violationLocation}. Police called directly.");
+                GTA.UI.Notification.PostTicker("You ran a red light! Police have been notified!", false, false);
+                return;
+            }
+        }
+    }
+
+    private bool DetectRedLightViolation(Ped player, Vehicle playerVeh)
+    {
+        try
+        {
+            // Vérifier la vitesse minimale
+            if (playerVeh.Speed < MinSpeedForViolation) return false;
+
+            // Sécurité : vérifier que le véhicule existe toujours
+            if (!playerVeh.Exists() || playerVeh.IsDead) return false;
+
+            Vector3 playerPos = player.Position;
+            
+            // Méthode simplifiée sans appels natives problématiques
+            // Vérifier si on est sur une route de manière sécurisée
+            bool onRoad = true; // Simplification pour éviter les crashes
+            try 
+            {
+                onRoad = Function.Call<bool>(Hash.IS_POINT_ON_ROAD, playerPos.X, playerPos.Y, playerPos.Z, 0);
+            }
+            catch
+            {
+                // Si l'appel natif échoue, considérer qu'on est sur une route
+                onRoad = true;
+            }
+            
+            if (!onRoad) return false;
+            
+            // Calculer la probabilité de griller un feu rouge basée sur la vitesse
+            float speedKmh = playerVeh.Speed * 3.6f; // Convertir en km/h
+            bool highSpeed = speedKmh > 50f; // Plus de 50 km/h
+            
+            // Méthode simplifiée pour détecter les véhicules arrêtés (moins fréquente)
+            bool likelyRedLight = false;
+            
+            // Ne vérifier les véhicules proches qu'une fois toutes les 2 secondes pour éviter la surcharge
+            if (DateTime.Now.Millisecond % 2000 < 100) // Environ toutes les 2 secondes
+            {
+                try 
+                {
+                    Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerPos, 20.0f); // Réduit le rayon
+                    int stoppedVehicles = 0;
+                    int totalNearbyVehicles = 0;
+                    
+                    foreach (Vehicle vehicle in nearbyVehicles)
+                    {
+                        if (vehicle != null && vehicle.Exists() && vehicle != playerVeh)
+                        {
+                            totalNearbyVehicles++;
+                            if (vehicle.Speed < 2.0f && vehicle.IsOnAllWheels) // Véhicule arrêté
+                            {
+                                stoppedVehicles++;
+                            }
+                        }
+                        
+                        // Limiter le nombre de véhicules vérifiés pour éviter la surcharge
+                        if (totalNearbyVehicles >= 10) break;
+                    }
+                    
+                    // Si beaucoup de véhicules sont arrêtés et que le joueur roule vite
+                    likelyRedLight = totalNearbyVehicles > 2 && 
+                                   stoppedVehicles >= (totalNearbyVehicles / 2) && 
+                                   highSpeed;
+                }
+                catch
+                {
+                    // En cas d'erreur, ne pas détecter de violation basée sur les véhicules
+                    likelyRedLight = false;
+                }
+            }
+            
+            // Alternative basée sur le temps : simuler des cycles de feux
+            // Utiliser la position du joueur pour créer un "cycle" pseudo-aléatoire mais cohérent
+            int locationHash = (int)(playerPos.X + playerPos.Y) % 60; // Cycle de 60 secondes
+            int currentTime = DateTime.Now.Second;
+            int timeInCycle = (currentTime + locationHash) % 60;
+            
+            // Feu rouge simulé pendant 20 secondes sur 60 (33% du temps)
+            bool simulatedRedLight = (timeInCycle >= 20 && timeInCycle < 40);
+            
+            // Violation détectée si : vitesse élevée ET (véhicules arrêtés OU feu rouge simulé)
+            // Réduit la probabilité pour éviter trop de détections
+            bool violation = highSpeed && (likelyRedLight || (simulatedRedLight && _random.Next(0, 100) < 30));
+            
+            if (violation)
+            {
+                Log($"Red light violation detected! Speed: {speedKmh:F1} km/h, " +
+                    $"Simulated red light: {simulatedRedLight}, Likely red light: {likelyRedLight}");
+            }
+            
+            return violation;
+        }
+        catch (Exception ex)
+        {
+            Log($"Error in DetectRedLightViolation: {ex.Message}");
+            return false; // En cas d'erreur, ne pas détecter de violation
+        }
+    }
+
+    // Méthodes de police identiques à NPCRoadRage
+    private void CheckPoliceArrival()
+    {
+        if (_policeVehicle == null || !_policeVehicle.Exists()) {
+             Log("Police vehicle does not exist. Aborting police response.");
+             CleanUpPolice(); 
+             return;
+        }
+         if (_respondingPolicePeds.All(p => p == null || !p.Exists() || p.IsDead)) {
+            Log("All responding police officers are gone or dead. Aborting police response.");
+            CleanUpPolice();
+            return;
+        }
+
+        Ped player = Game.Player.Character;
+        if (player != null && player.Exists()) 
+        {
+            float playerDistanceToViolation = player.Position.DistanceTo(_violationLocation);
+            bool playerHasFled = playerDistanceToViolation > 80f && !_policeInteractionActive && !_makingPoliceDecision;
+            
+            if (playerHasFled)
+            {
+                Log($"Player has fled the scene. Distance to violation: {playerDistanceToViolation:F2}m. Setting wanted level.");
+                GTA.UI.Notification.PostTicker("You fled the scene of a traffic violation! Police are now searching for you.", false, false);
+                Game.Player.Wanted.SetWantedLevel(1, false);
+                CleanUpPolice();
+                return;
+            }
+        }
+
+        Ped driver = _policeVehicle.Driver;
+        float distanceToViolation = _policeVehicle.Position.DistanceTo(_violationLocation);
+        
+        bool needsNavigationCheck = _lastPoliceRedirectionTime == DateTime.MinValue || 
+                                   DateTime.Now > _lastPoliceRedirectionTime + TimeSpan.FromSeconds(20);
+        
+        if (needsNavigationCheck && distanceToViolation > 25f)
+        {
+            _lastPoliceRedirectionTime = DateTime.Now;
+            
+            bool isProgressingTowardsTarget = false;
+            bool isActuallyStuck = false;
+            
+            if (_lastRecordedDistance != float.MaxValue)
+            {
+                float distanceChange = _lastRecordedDistance - distanceToViolation;
+                float timeSinceLastCheck = (float)(DateTime.Now - _lastProgressTime).TotalSeconds;
+                
+                isProgressingTowardsTarget = (distanceChange > 1f && timeSinceLastCheck > 0) || _policeVehicle.Speed > 2f;
+                isActuallyStuck = _policeVehicle.Speed < PoliceStuckSpeedThreshold && distanceChange < 0.5f && timeSinceLastCheck > 15f;
+                
+                Log($"Police navigation check - Distance: {distanceToViolation:F2}, Speed: {_policeVehicle.Speed:F2}, DistanceChange: {distanceChange:F2}, Stuck: {isActuallyStuck}, Progressing: {isProgressingTowardsTarget}");
+            }
+            
+            _lastRecordedDistance = distanceToViolation;
+            _lastProgressTime = DateTime.Now;
+            
+            bool needsNavigationCorrection = isActuallyStuck && distanceToViolation > 30f;
+            
+            if (needsNavigationCorrection && _navigationRetryCount < MaxNavigationRetries)
+            {
+                CorrectPoliceNavigation(distanceToViolation, false);
+                return;
+            }
+            
+            if (_navigationRetryCount >= MaxNavigationRetries && distanceToViolation > 40f && 
+                DateTime.Now > _stateTimer + TimeSpan.FromMinutes(1.5f))
+            {
+                Log("Navigation failed. Implementing emergency teleportation.");
+                EmergencyPoliceReposition();
+                return;
+            }
+        }
+        
+        bool arrivedAtScene = distanceToViolation < PoliceArrivalDistanceThreshold || 
+                             (distanceToViolation < ForceArrivalDistance && _policeVehicle.Speed < 5.0f) || 
+                             (distanceToViolation < 15.0f);
+        
+        if (driver != null && driver.Exists() && !driver.IsDead && arrivedAtScene)
+        {
+            Log($"Police arrived at violation scene. Distance: {distanceToViolation:F2}, Speed: {_policeVehicle.Speed:F2}");
+            ForcePoliceArrival();
+        }
+        else if (driver != null && driver.Exists() && driver.IsDead) 
+        {
+            Log("Police driver died en route. Aborting police response.");
+            CleanUpPolice();
+        }
+        else if (DateTime.Now > _stateTimer + _policeDispatchTimeoutDuration) 
+        {
+            Log("Police dispatch timed out. Cleaning up.");
+            CleanUpPolice(); 
+        }
+        else
+        {
+            if (DateTime.Now > _lastPoliceRedirectionTime + TimeSpan.FromSeconds(30))
+            {
+                Log($"Police en route - Distance: {distanceToViolation:F2}, Speed: {_policeVehicle.Speed:F2}, Retries: {_navigationRetryCount}");
+            }
+        }
+    }
+
+    private void CorrectPoliceNavigation(float currentDistance, bool movingAway)
+    {
+        if (_policeVehicle == null || !_policeVehicle.Exists()) return;
+        
+        Ped driver = _policeVehicle.Driver;
+        if (driver == null || !driver.Exists() || driver.IsDead) return;
+        
+        _navigationRetryCount++;
+        Log($"Correcting police navigation (attempt {_navigationRetryCount}/{MaxNavigationRetries})");
+        
+        driver.Task.ClearAll();
+        Script.Wait(300);
+        
+        Vector3 targetPosition = _violationLocation;
+        
+        switch (_navigationRetryCount)
+        {
+            case 1:
+                Log("Navigation correction 1: Direct path with aggressive flags");
+                driver.Task.DriveTo(_policeVehicle, targetPosition, 8.0f, 
+                                  VehicleDrivingFlags.AllowGoingWrongWay | 
+                                  VehicleDrivingFlags.ForceStraightLine | 
+                                  VehicleDrivingFlags.UseShortCutLinks, 
+                                  PoliceDriveSpeed + 20f);
+                break;
+                
+            case 2:
+                Vector3 nearestRoad = World.GetNextPositionOnStreet(_violationLocation, true);
+                if (nearestRoad == Vector3.Zero || nearestRoad.DistanceTo(_violationLocation) > 30f)
+                {
+                    nearestRoad = _violationLocation;
+                }
+                
+                Log($"Navigation correction 2: Targeting nearest road at {nearestRoad}");
+                driver.Task.DriveTo(_policeVehicle, nearestRoad, 10.0f, 
+                                  VehicleDrivingFlags.AllowGoingWrongWay | 
+                                  VehicleDrivingFlags.ForceStraightLine, 
+                                  PoliceDriveSpeed + 30f);
+                break;
+                
+            default:
+                Log("Navigation correction 3: Using native GTA driving task");
+                Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD, driver.Handle, _policeVehicle.Handle, 
+                             targetPosition.X, targetPosition.Y, targetPosition.Z, 
+                             PoliceDriveSpeed + 40f, 1, _policeVehicle.Model.Hash, 
+                             (int)(VehicleDrivingFlags.AllowGoingWrongWay | VehicleDrivingFlags.ForceStraightLine), 
+                             5.0f, -1);
+                break;
+        }
+        
+        _lastProgressTime = DateTime.Now;
+        _lastRecordedDistance = currentDistance;
+    }
+    
+    private void EmergencyPoliceReposition()
+    {
+        if (_policeVehicle == null || !_policeVehicle.Exists())
+        {
+            Log("Emergency police reposition failed: Police vehicle does not exist");
+            return;
+        }
+        
+        Log("Emergency police reposition initiated");
+        Vector3 emergencyPosition = FindEmergencyPolicePosition();
+        
+        if (emergencyPosition != Vector3.Zero)
+        {
+            Log($"Teleporting police vehicle to emergency position: {emergencyPosition}");
+            
+            _policeVehicle.Speed = 0f;
+            _policeVehicle.Position = emergencyPosition;
+            _policeVehicle.PlaceOnGround();
+            _policeVehicle.Heading = Utility.GetHeadingFromVector(_violationLocation - emergencyPosition);
+            
+            Script.Wait(100);
+            
+            Ped driver = _policeVehicle.Driver;
+            if (driver != null && driver.Exists() && !driver.IsDead)
+            {
+                driver.Task.DriveTo(_policeVehicle, _violationLocation, 5.0f, 
+                                  VehicleDrivingFlags.AllowGoingWrongWay, 
+                                  PoliceDriveSpeed);
+            }
+            
+            _navigationRetryCount = 0;
+            _lastRecordedDistance = emergencyPosition.DistanceTo(_violationLocation);
+        }
+        else
+        {
+            Log("Could not find suitable emergency position. Forcing arrival.");
+            ForcePoliceArrival();
+        }
+    }
+    
+    private Vector3 FindEmergencyPolicePosition()
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            float angle = i * 45f * (float)(Math.PI / 180f);
+            float distance = 25f + (i * 5f);
+            
+            Vector3 offset = new Vector3(
+                (float)Math.Cos(angle) * distance,
+                (float)Math.Sin(angle) * distance,
+                0f
+            );
+            
+            Vector3 candidatePos = _violationLocation + offset;
+            Vector3 roadPos = World.GetNextPositionOnStreet(candidatePos);
+            
+            if (roadPos != Vector3.Zero && roadPos.DistanceTo(_violationLocation) < 80f)
+            {
+                Log($"Found emergency position {i}: {roadPos} (distance to violation: {roadPos.DistanceTo(_violationLocation):F2}m)");
+                return roadPos;
+            }
+        }
+        
+        Log("No suitable emergency position found");
+        return Vector3.Zero;
+    }
+    
+    private void ForcePoliceArrival()
+    {
+        if (_policeVehicle == null || !_policeVehicle.Exists())
+        {
+            Log("Force police arrival failed: Police vehicle does not exist");
+            return;
+        }
+        
+        Log("Forcing police arrival");
+        
+        _policeVehicle.Speed = 0f;
+        _policeVehicle.IsSirenActive = false;
+        _policeVehicle.IsEngineRunning = false;
+        
+        foreach (Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive))
+        {
+            if (officer.IsInVehicle(_policeVehicle))
+            {
+                Log($"Forcing officer {officer.Handle} to exit vehicle immediately");
+                ForceOfficerOutOfVehicle(officer, _policeVehicle);
+            }
+        }
+        
+        _policeArrived = true;
+        _policeInteractionActive = true;
+        _stateTimer = DateTime.Now;
+        _policeInteractionStage = -1;
+        
+        ResetNavigationTracking();
+        
+        Log("Police arrival forced and interaction initiated");
+    }
+    
+    private void ResetNavigationTracking()
+    {
+        _lastRecordedDistance = float.MaxValue;
+        _lastProgressTime = DateTime.MinValue;
+        _navigationRetryCount = 0;
+        _lastPoliceRedirectionTime = DateTime.MinValue;
+        _lastPolicePosition = Vector3.Zero;
+        _policeStuckStartTime = DateTime.MinValue;
+    }
+
+    private void DispatchPolice(Vector3 violationLocation) {
+        if (_policeDispatched) return; 
+        Log($"Dispatching police to traffic violation at: {violationLocation}");
+        _policeDispatched = true;
+        _policeArrived = false; 
+        _stateTimer = DateTime.Now;
+        ResetNavigationTracking();
+
+        Vector3 spawnPoint = FindOptimalPoliceSpawnPoint(violationLocation);
+        if (spawnPoint == Vector3.Zero) {
+            Log("Could not find optimal spawn point. Aborting police dispatch.");
+            _policeDispatched = false; 
+            PoliceCalled = false; 
+            return;
+        }
+
+        _policeVehicle = World.CreateVehicle(_policeVehicleModel, spawnPoint, Utility.GetHeadingFromVector(violationLocation - spawnPoint)); 
+        if (_policeVehicle == null || !_policeVehicle.Exists())
+        {
+            Log("Failed to spawn police vehicle.");
+            _policeDispatched = false; PoliceCalled = false; return;
+        }
+        
+        _policeVehicle.PlaceOnGround();
+        _policeVehicle.IsSirenActive = true;
+        _policeVehicle.IsEngineRunning = true;
+        
+        Log($"Police vehicle {_policeVehicle.Handle} spawned at {spawnPoint} (distance: {spawnPoint.DistanceTo(violationLocation):F2}m)");
+
+        _respondingPolicePeds.Clear(); 
+        for (int i = 0; i < NumberOfPoliceOfficers; i++)
+        {
+            Vector3 officerSpawnPos = _policeVehicle.Position + _policeVehicle.RightVector * (i * 1.5f) - _policeVehicle.ForwardVector * (i * 0.5f);
+            Ped officer = World.CreatePed(_policePedModel, officerSpawnPos);
+            if (officer != null && officer.Exists())
+            {
+                _respondingPolicePeds.Add(officer);
+                officer.Armor = 100;
+                officer.Health = officer.MaxHealth;
+                officer.Weapons.Give(WeaponHash.CombatPistol, 250, true, true);
+                
+                Function.Call(Hash.SET_DRIVER_ABILITY, officer.Handle, 1.0f);
+                Function.Call(Hash.SET_DRIVER_AGGRESSIVENESS, officer.Handle, 0.8f);
+                
+                Log($"Spawned police officer {officer.Handle}");
+                if (i == 0) officer.SetIntoVehicle(_policeVehicle, VehicleSeat.Driver);
+                else officer.SetIntoVehicle(_policeVehicle, VehicleSeat.Passenger);
+            } else Log($"Failed to spawn officer {i+1}.");
+        }
+
+        Ped driver = _policeVehicle.Driver;
+        if (driver != null && driver.Exists() && _respondingPolicePeds.Contains(driver) && _policeVehicle != null && _policeVehicle.Exists()) 
+        {
+            Log($"Police driver {driver.Handle} is in vehicle. Tasking to drive to violation: {violationLocation}");
+            
+            VehicleDrivingFlags initialFlags = VehicleDrivingFlags.AllowGoingWrongWay | 
+                                              VehicleDrivingFlags.PreferNavmeshRoute | 
+                                              VehicleDrivingFlags.UseShortCutLinks |
+                                              VehicleDrivingFlags.SteerAroundObjects;
+            
+            driver.Task.DriveTo(_policeVehicle, violationLocation, 8.0f, initialFlags, PoliceDriveSpeed + 10f);
+            _policeVehicle.IsSirenActive = true; 
+        } else {
+            Log("Police driver not found or not set in vehicle correctly. Cannot dispatch.");
+            CleanUpPolice(); 
+            return;
+        }
+        GTA.UI.Notification.PostTicker("Police have been dispatched to investigate the traffic violation!", false, false);
+    }
+
+    private Vector3 FindOptimalPoliceSpawnPoint(Vector3 violationLocation)
+    {
+        Log("Finding optimal police spawn point...");
+        
+        Vector3[] spawnAttempts = new Vector3[16];
+        
+        for (int i = 0; i < 4; i++)
+        {
+            float angle = i * 90f * (float)(Math.PI / 180f);
+            float distance = 70f;
+            Vector3 offset = new Vector3(
+                (float)Math.Cos(angle) * distance,
+                (float)Math.Sin(angle) * distance,
+                0f
+            );
+            spawnAttempts[i] = violationLocation + offset;
+        }
+        
+        for (int i = 0; i < 4; i++)
+        {
+            float angle = i * 90f * (float)(Math.PI / 180f);
+            float distance = 90f;
+            Vector3 offset = new Vector3(
+                (float)Math.Cos(angle) * distance,
+                (float)Math.Sin(angle) * distance,
+                0f
+            );
+            spawnAttempts[i + 4] = violationLocation + offset;
+        }
+        
+        Ped player = Game.Player.Character;
+        if (player != null && player.Exists())
+        {
+            Vector3 behindPlayer1 = violationLocation + (-player.ForwardVector * 80f);
+            Vector3 behindPlayer2 = violationLocation + (-player.ForwardVector * 100f);
+            Vector3 leftOfPlayer = violationLocation + (-player.RightVector * 80f);
+            Vector3 rightOfPlayer = violationLocation + (player.RightVector * 80f);
+            
+            spawnAttempts[8] = behindPlayer1;
+            spawnAttempts[9] = behindPlayer2;
+            spawnAttempts[10] = leftOfPlayer;
+            spawnAttempts[11] = rightOfPlayer;
+        }
+        else
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                float angle = (i * 90f + 45f) * (float)(Math.PI / 180f);
+                float distance = 80f;
+                Vector3 offset = new Vector3(
+                    (float)Math.Cos(angle) * distance,
+                    (float)Math.Sin(angle) * distance,
+                    0f
+                );
+                spawnAttempts[i + 8] = violationLocation + offset;
+            }
+        }
+        
+        for (int i = 0; i < 4; i++)
+        {
+            float angle = _random.Next(0, 360) * (float)(Math.PI / 180f);
+            float distance = 70f + _random.Next(0, 40);
+            Vector3 offset = new Vector3(
+                (float)Math.Cos(angle) * distance,
+                (float)Math.Sin(angle) * distance,
+                0f
+            );
+            spawnAttempts[i + 12] = violationLocation + offset;
+        }
+        
+        for (int i = 0; i < spawnAttempts.Length; i++)
+        {
+            Vector3 candidatePos = spawnAttempts[i];
+            Vector3 roadPos = World.GetNextPositionOnStreet(candidatePos, true);
+            
+            if (roadPos != Vector3.Zero)
+            {
+                float distanceToViolation = roadPos.DistanceTo(violationLocation);
+                
+                if (distanceToViolation >= PoliceSpawnMinDistance && 
+                    distanceToViolation <= PoliceSpawnMaxDistance)
+                {
+                    Log($"Found suitable spawn point {i}: {roadPos} (distance: {distanceToViolation:F2}m)");
+                    return roadPos;
+                }
+                else if (distanceToViolation >= 50f && distanceToViolation <= 140f)
+                {
+                    Log($"Found acceptable spawn point {i}: {roadPos} (distance: {distanceToViolation:F2}m) - using fallback criteria");
+                    return roadPos;
+                }
+                else
+                {
+                    Log($"Spawn attempt {i} distance out of range: {distanceToViolation:F2}m");
+                }
+            }
+            else
+            {
+                Log($"Spawn attempt {i} failed to find road position");
+            }
+        }
+        
+        Vector3 fallbackSpawn = violationLocation + new Vector3(80, 80, 0);
+        Vector3 fallbackRoad = World.GetNextPositionOnStreet(fallbackSpawn, true);
+        if (fallbackRoad != Vector3.Zero)
+        {
+            fallbackSpawn = fallbackRoad;
+        }
+        
+        Log($"Using emergency fallback spawn position: {fallbackSpawn} (distance: {fallbackSpawn.DistanceTo(violationLocation):F2}m)");
+        return fallbackSpawn;
+    }
+
+    private void ProcessPoliceInteraction()
+    {
+        Ped player = Game.Player.Character;
+        Ped leadOfficer = _respondingPolicePeds.FirstOrDefault(p => p != null && p.Exists() && p.IsAlive); 
+
+        if (leadOfficer == null || player == null || !player.Exists()) { 
+            Log("Lead officer or player is invalid. Ending police interaction.");
+            EndPoliceInteraction(); return; 
+        }
+
+        bool shouldDisableControls = _policeInteractionStage >= 0 && _policeInteractionStage != 1;
+        
+        if (shouldDisableControls && !_playerControlDisabled) {
+            Log("Disabling player control for active police interaction.");
+            Function.Call(Hash.DISABLE_ALL_CONTROL_ACTIONS, 0);
+            _playerControlDisabled = true;
+        } else if (!shouldDisableControls && _playerControlDisabled) {
+            Log("Re-enabling player control for menu interaction.");
+            Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
+            _playerControlDisabled = false;
+        }
+        
+        if (_policeInteractionStage != 1 || !_showingResponseMenu) {
+            player.Task.LookAt(leadOfficer);
+        }
+        
+        uint taskGotoEntityHash = (uint)Function.Call<int>(Hash.GET_HASH_KEY, "TASK_GOTO_ENTITY");
+        uint taskGotoCoordHash = (uint)Function.Call<int>(Hash.GET_HASH_KEY, "TASK_GOTO_COORD_ANY_PED");
+
+        if (!leadOfficer.IsRagdoll && 
+            (uint)Function.Call<int>(Hash.GET_SCRIPT_TASK_STATUS, leadOfficer.Handle, -1) != taskGotoEntityHash &&
+            (uint)Function.Call<int>(Hash.GET_SCRIPT_TASK_STATUS, leadOfficer.Handle, -1) != taskGotoCoordHash 
+            ) { 
+            leadOfficer.Task.LookAt(player);
+        }
+
+        switch (_policeInteractionStage)
+        {
+            case -1: 
+                Log($"Police interaction stage -1. Officers count: {_respondingPolicePeds.Count(o => o != null && o.Exists() && o.IsAlive)}");
+                
+                int officersStillInVehicle = 0;
+                int totalValidOfficers = 0;
+                
+                foreach(Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive)) 
+                {
+                    totalValidOfficers++;
+                    if(_policeVehicle != null && _policeVehicle.Exists() && officer.IsInVehicle(_policeVehicle)) 
+                    {
+                        officersStillInVehicle++;
+                        Log($"Officer {officer.Handle} still in vehicle, forcing exit immediately.");
+                        ForceOfficerOutOfVehicle(officer, _policeVehicle);
+                    }
+                }
+                
+                Log($"Officers status: {officersStillInVehicle}/{totalValidOfficers} still in vehicle");
+                
+                if (officersStillInVehicle == 0 && totalValidOfficers > 0) {
+                    Log($"All officers confirmed out of vehicle. Starting approach phase.");
+                    _policeInteractionStage = 0;
+                    _stateTimer = DateTime.Now;
+                    break;
+                }
+                
+                if (DateTime.Now > _stateTimer + TimeSpan.FromSeconds(5)) {
+                    Log($"Timeout reached - forcing all officers out immediately regardless of status.");
+                    
+                    foreach(Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive)) {
+                        if(_policeVehicle != null && _policeVehicle.Exists() && officer.IsInVehicle(_policeVehicle)) {
+                            Log($"Emergency: Force teleporting officer {officer.Handle} out of vehicle.");
+                            
+                            Vector3 exitPos = _policeVehicle.Position + _policeVehicle.RightVector * (4.0f + _respondingPolicePeds.IndexOf(officer) * 2.0f);
+                            exitPos.Z = _policeVehicle.Position.Z + 1.0f;
+                            
+                            Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, officer.Handle, exitPos.X, exitPos.Y, exitPos.Z, true, true, true);
+                            Script.Wait(100);
+                            
+                            officer.BlockPermanentEvents = true;
+                            Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 429, true);
+                        }
+                    }
+                    
+                    Log("Emergency timeout - forcing progression to approach stage.");
+                    _policeInteractionStage = 0;
+                    _stateTimer = DateTime.Now;
+                }
+                break;
+                
+            case 0: // Approche des officiers
+                bool allOfficersReady = true;
+                
+                foreach(Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive)) {
+                    float distanceToPlayer = officer.Position.DistanceTo(player.Position);
+                    
+                    if (distanceToPlayer > OfficerApproachDistanceThreshold) {
+                        Vector3 playerForward = player.ForwardVector;
+                        Vector3 violationDirection = (_violationLocation - player.Position).Normalized;
+                        
+                        Vector3 approachDirection = (playerForward + violationDirection * 1.5f).Normalized;
+                        Vector3 approachPos = player.Position + approachDirection * 4.0f;
+                        
+                        float sideOffset = ((_respondingPolicePeds.IndexOf(officer) % 2 == 0) ? -1.5f : 1.5f);
+                        approachPos += player.RightVector * sideOffset;
+                        
+                        float distanceToViolation = approachPos.DistanceTo(_violationLocation);
+                        if (distanceToViolation > 10.0f) {
+                            Vector3 toViolation = (_violationLocation - approachPos).Normalized;
+                            approachPos += toViolation * 3.0f;
+                        }
+                        
+                        // Limiter la fréquence des tâches pour éviter la boucle infinie
+                        if (!_officerLastTaskedTime.ContainsKey(officer.Handle) || 
+                            DateTime.Now > _officerLastTaskedTime[officer.Handle] + TimeSpan.FromSeconds(2))
+                        {
+                            if (!officer.IsWalking && !officer.IsRunning) {
+                                officer.Task.FollowNavMeshTo(approachPos);
+                                Log($"Officer {officer.Handle} tasked to approach player frontally (distance: {distanceToPlayer:F2}m).");
+                                _officerLastTaskedTime[officer.Handle] = DateTime.Now;
+                            }
+                        }
+                        allOfficersReady = false;
+                    } else {
+                        // Assez proche - arrêter et regarder le joueur
+                        if (officer.IsWalking || officer.IsRunning) {
+                            officer.Task.StandStill(-1);
+                            Script.Wait(50);
+                            
+                            Vector3 lookDirection = (player.Position - officer.Position).Normalized;
+                            float heading = Utility.GetHeadingFromVector(lookDirection);
+                            officer.Heading = heading;
+                            
+                            officer.Task.LookAt(player);
+                        }
+                    }
+                }
+                
+                if (allOfficersReady || DateTime.Now > _stateTimer + TimeSpan.FromSeconds(8)) {
+                    Log("Officers positioned in front of player. Starting dialogue.");
+                    _policeInteractionStage = 1;
+                    _stateTimer = DateTime.Now;
+                }
+                break;
+                
+            case 1: 
+                if (DateTime.Now < _stateTimer + TimeSpan.FromSeconds(1)) return; 
+                GTA.UI.Notification.PostTicker("Officer: We received a report of a traffic violation here.", false, false);
+                Log("Interaction Stage 1: Officer statement 1.");
+                _policeInteractionStage++; _stateTimer = DateTime.Now; 
+                break;
+            case 2: 
+                if (DateTime.Now < _stateTimer + _policeInteractionDialoguePauseDuration) return;
+                
+                if (!_showingResponseMenu) {
+                    GTA.UI.Notification.PostTicker("Officer: You ran a red light. What do you have to say for yourself?", false, false);
+                    Log("Interaction Stage 2: Officer asks player - showing response menu.");
+                    _showingResponseMenu = true;
+                    _selectedResponseIndex = 0;
+                    
+                    if (_playerControlDisabled) {
+                        Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
+                        _playerControlDisabled = false;
+                        Log("Enabling controls for response menu.");
+                    }
+                    return;
+                }
+                
+                DrawResponseMenu();
+                return;
+                
+            case 3: 
+                if (DateTime.Now < _stateTimer + _policeInteractionDialoguePauseDuration) return;
+                GTA.UI.Notification.PostTicker("Officer: We have traffic cameras that recorded the violation.", false, false);
+                Log("Interaction Stage 3: Officer mentions evidence.");
+                _policeInteractionStage++; _stateTimer = DateTime.Now;
+                break;
+            case 4: 
+                if (DateTime.Now < _stateTimer + _policeInteractionDialoguePauseDuration) return;
+                GTA.UI.Notification.PostTicker("Officer: Let me assess the situation and decide what to do...", false, false);
+                Log("Interaction Stage 4: Officer assessing.");
+                _policeInteractionStage++; _stateTimer = DateTime.Now; 
+                break;
+            case 5: 
+                if (DateTime.Now < _stateTimer + _policeDecisionPauseDuration) return;
+                Log("Transitioning to police decision making.");
+                _policeInteractionActive = false; _makingPoliceDecision = true;     
+                _stateTimer = DateTime.Now; 
+                DecidePoliceAction(); 
+                break;
+        }
+    }
+
+    private void DecidePoliceAction() {
+        Log("Deciding police action for traffic violation...");
+        bool playerCooperative = true;
+        bool admitFault = false;
+        string lowerPlayerResponse = _playerResponse.ToLower();
+
+        if (lowerPlayerResponse.Contains("didn't see") || lowerPlayerResponse.Contains("sorry") || lowerPlayerResponse.Contains("accident") || lowerPlayerResponse.Contains("just turned")) {
+            admitFault = true; Log("Player admitted fault or apologized for traffic violation.");
+        }
+        if (lowerPlayerResponse.Contains("harassment") || lowerPlayerResponse.Contains("bullshit") || lowerPlayerResponse.Contains("asshole") || 
+            lowerPlayerResponse.Contains("fuck")) {
+            playerCooperative = false; Log("Player was uncooperative/aggressive in response.");
+        }
+        if (lowerPlayerResponse == "i have nothing to say." || string.IsNullOrWhiteSpace(_playerResponse)) {
+            playerCooperative = false; Log("Player was evasive.");
+        }
+
+        Ped player = Game.Player.Character;
+
+        if (player != null && player.Exists() && Game.Player.Wanted.WantedLevel > 0) { 
+             _currentPoliceDecision = PoliceDecision.ArrestPlayer; Log("Decision: Arrest Player (already wanted).");
+        } else if (!playerCooperative && !admitFault) {
+            _currentPoliceDecision = PoliceDecision.ArrestPlayer; Log("Decision: Arrest Player (uncooperative and no admission).");
+        } else if (!playerCooperative && admitFault) {
+            _currentPoliceDecision = PoliceDecision.GiveFine; Log("Decision: Give Fine (uncooperative but admitted fault).");
+        } else if (admitFault && playerCooperative) {
+            int chance = _random.Next(0, 3);
+            if (chance == 0) { _currentPoliceDecision = PoliceDecision.GiveFine; Log("Decision: Give Fine (cooperative and admitted fault, 33% chance)."); }
+            else { _currentPoliceDecision = PoliceDecision.LetPlayerGo; Log("Decision: Let Player Go (cooperative and admitted fault, 67% chance)."); }
+        } else {
+            _currentPoliceDecision = PoliceDecision.GiveFine; Log("Decision: Give Fine (default for traffic violation).");
+        }
+        _stateTimer = DateTime.Now; 
+    }
+
+    private void ProcessPoliceDecisionOutcome()
+    {
+        Ped player = Game.Player.Character;
+        Ped arrestingOfficer = _respondingPolicePeds.FirstOrDefault(p => p != null && p.Exists() && p.IsAlive);
+        
+        if (player == null || !player.Exists()) { Log("Player is invalid, cannot process decision outcome."); EndPoliceInteraction(); return; }
+
+        if (arrestingOfficer == null && _currentPoliceDecision == PoliceDecision.ArrestPlayer) {
+            Log("No officer available to perform arrest. Giving fine by default.");
+            _currentPoliceDecision = PoliceDecision.GiveFine; 
+            _stateTimer = DateTime.Now; 
+        }
+
+        switch (_currentPoliceDecision)
+        {
+            case PoliceDecision.ArrestPlayer:
+                bool alreadyArrested = player.IsCuffed || Function.Call<bool>(Hash.IS_PED_BEING_ARRESTED, player.Handle);
+                if (!alreadyArrested) {
+                    GTA.UI.Notification.PostTicker("Officer: You're under arrest for reckless driving!", false, false);
+                    if (arrestingOfficer != null && arrestingOfficer.Exists()) 
+                    {
+                        Log($"Officer {arrestingOfficer.Handle} is arresting player {player.Handle}.");
+                        arrestingOfficer.Task.Arrest(player);
+                    }
+                }
+                
+                if (DateTime.Now > _stateTimer + _policeArrestSequenceDuration || player.IsCuffed || Function.Call<bool>(Hash.IS_PED_BEING_ARRESTED, player.Handle)) {
+                    GTA.UI.Screen.ShowSubtitle("~r~BUSTED!", 5000);
+                    Log("Player busted for traffic violation. Ending interaction.");
+                    int currentWantedLevel = Game.Player.Wanted.WantedLevel; 
+                    Game.Player.Wanted.SetWantedLevel(Math.Max(currentWantedLevel, 1), false);
+                    EndPoliceInteraction(true); 
+                }
+                break;
+
+            case PoliceDecision.GiveFine:
+                if (!_fineAlreadyGiven && DateTime.Now >= _stateTimer + TimeSpan.FromSeconds(0.5)) { 
+                     int fineAmount = _random.Next(150, 500); // Traffic fines are generally lower
+                     GTA.UI.Notification.PostTicker($"Officer: You're getting a ${fineAmount} fine for running a red light.", false, false);
+                     Log($"Police giving player traffic fine of ${fineAmount}.");
+                     
+                     if (Game.Player.Money >= fineAmount) {
+                         Game.Player.Money -= fineAmount;
+                         GTA.UI.Notification.PostTicker($"~r~-${fineAmount} Traffic fine paid", false, false);
+                     } else {
+                         GTA.UI.Notification.PostTicker("~r~Insufficient funds! You'll need to pay at the police station.", false, false);
+                     }
+                     
+                     _fineAlreadyGiven = true;
+                }
+
+                if (DateTime.Now > _stateTimer + _policeInteractionDialoguePauseDuration)
+                {
+                    Log("Police finished with traffic fine interaction. Sending police away naturally.");
+                    _policeInteractionActive = false;
+                    _makingPoliceDecision = false;
+                    SendPoliceAway();
+                }
+                break;
+
+            case PoliceDecision.LetPlayerGo:
+                if (!_decisionMessageShown && DateTime.Now >= _stateTimer + TimeSpan.FromSeconds(0.5)) { 
+                     GTA.UI.Notification.PostTicker("Officer: Alright, be more careful at intersections. You're free to go.", false, false);
+                     Log("Police letting player go for traffic violation.");
+                     _decisionMessageShown = true;
+                }
+
+                if (DateTime.Now > _stateTimer + _policeInteractionDialoguePauseDuration)
+                {
+                    Log("Police finished letting player go. Sending police away naturally.");
+                    _policeInteractionActive = false;
+                    _makingPoliceDecision = false;
+                    SendPoliceAway();
+                }
+                break;
+        }
+    }
+
+    private void DrawResponseMenu()
+    {
+        if (_lastMenuDisplayTime == DateTime.MinValue || DateTime.Now > _lastMenuDisplayTime + TimeSpan.FromSeconds(1))
+        {
+            GTA.UI.Notification.PostTicker("~y~POLICE INTERACTION~w~ - Select your response:", true, false);
+            _lastMenuDisplayTime = DateTime.Now;
+        }
+
+        string menuTitle = $"~b~RESPONSE MENU~w~ - Use ↑↓ or 1-5 keys, then ENTER";
+        GTA.UI.Screen.ShowSubtitle(menuTitle, 200);
+        
+        float screenX = 0.1f;
+        float screenY = 0.3f;
+        
+        Function.Call(Hash.SET_TEXT_FONT, 4);
+        Function.Call(Hash.SET_TEXT_SCALE, 0.6f, 0.6f);
+        Function.Call(Hash.SET_TEXT_COLOUR, 255, 255, 0, 255);
+        Function.Call(Hash.SET_TEXT_OUTLINE);
+        Function.Call(Hash.SET_TEXT_CENTRE, false);
+        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, "~y~TRAFFIC VIOLATION RESPONSE MENU~w~");
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, screenX, screenY);
+        
+        for (int i = 0; i < _responseOptions.Length; i++)
+        {
+            float optionY = screenY + 0.05f + (i * 0.04f);
+            
+            if (i == _selectedResponseIndex)
+            {
+                Function.Call(Hash.SET_TEXT_FONT, 4);
+                Function.Call(Hash.SET_TEXT_SCALE, 0.7f, 0.7f);
+                Function.Call(Hash.SET_TEXT_COLOUR, 0, 255, 0, 255);
+                Function.Call(Hash.SET_TEXT_OUTLINE);
+                Function.Call(Hash.SET_TEXT_CENTRE, false);
+                Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+                Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $">>> {i + 1}. {_responseOptions[i]} <<<");
+                Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, screenX, optionY);
+            }
+            else
+            {
+                Function.Call(Hash.SET_TEXT_FONT, 4);
+                Function.Call(Hash.SET_TEXT_SCALE, 0.5f, 0.5f);
+                Function.Call(Hash.SET_TEXT_COLOUR, 255, 255, 255, 255);
+                Function.Call(Hash.SET_TEXT_OUTLINE);
+                Function.Call(Hash.SET_TEXT_CENTRE, false);
+                Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+                Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, $"    {i + 1}. {_responseOptions[i]}");
+                Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, screenX, optionY);
+            }
+        }
+        
+        float instructionY = screenY + 0.05f + (_responseOptions.Length * 0.04f) + 0.03f;
+        Function.Call(Hash.SET_TEXT_FONT, 4);
+        Function.Call(Hash.SET_TEXT_SCALE, 0.4f, 0.4f);
+        Function.Call(Hash.SET_TEXT_COLOUR, 255, 255, 0, 255);
+        Function.Call(Hash.SET_TEXT_OUTLINE);
+        Function.Call(Hash.SET_TEXT_CENTRE, false);
+        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_TEXT, "STRING");
+        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, "~y~Controls: ↑↓ arrows to navigate, ENTER to select, or press 1-5 directly~w~");
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_TEXT, screenX, instructionY);
+        
+        Function.Call(Hash.BEGIN_TEXT_COMMAND_DISPLAY_HELP, "STRING");
+        string helpText = $"Current selection: ~g~{_selectedResponseIndex + 1}. {_responseOptions[_selectedResponseIndex]}~w~";
+        Function.Call(Hash.ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, helpText);
+        Function.Call(Hash.END_TEXT_COMMAND_DISPLAY_HELP, 0, 0, 1, -1);
+        
+        if (_lastMenuDisplayTime == DateTime.MinValue || DateTime.Now > _lastMenuDisplayTime + TimeSpan.FromSeconds(2))
+        {
+            Log($"Menu displayed - Selected option: {_selectedResponseIndex + 1}/{_responseOptions.Length} - '{_responseOptions[_selectedResponseIndex]}'");
+        }
+    }
+    
+    private void SelectResponse()
+    {
+        if (_selectedResponseIndex >= 0 && _selectedResponseIndex < _responseOptions.Length)
+        {
+            _playerResponse = _responseOptions[_selectedResponseIndex];
+            _showingResponseMenu = false;
+            
+            Log($"Player selected response: {_playerResponse}");
+            GTA.UI.Notification.PostTicker($"You: {_playerResponse}", false, false);
+            
+            _policeInteractionStage++;
+            _stateTimer = DateTime.Now;
+        }
+    }
+
+    // Méthodes utilitaires restantes (identiques à NPCRoadRage)
+    private void ForceOfficerOutOfVehicle(Ped officer, Vehicle vehicle)
+    {
+        if (officer == null || !officer.Exists() || !officer.IsAlive || vehicle == null || !vehicle.Exists()) return;
+        if (!officer.IsInVehicle(vehicle)) return;
+
+        Log($"ForceOfficerOutOfVehicle: Forcing officer {officer.Handle} out of vehicle {vehicle.Handle}");
+
+        officer.Task.ClearAllImmediately();
+        Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 32, false);
+        Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 281, false);
+        Function.Call(Hash.TASK_LEAVE_VEHICLE, officer.Handle, vehicle.Handle, 0);
+        Script.Wait(100);
+
+        if (officer.IsInVehicle(vehicle))
+        {
+            Vector3 exitPos = vehicle.Position + vehicle.RightVector * 4.0f + vehicle.ForwardVector * 2.0f;
+            exitPos.Z = vehicle.Position.Z + 1.0f;
+            Function.Call(Hash.SET_ENTITY_COORDS, officer.Handle, exitPos.X, exitPos.Y, exitPos.Z, false, false, false, true);
+            Script.Wait(50);
+        }
+
+        if (officer.IsInVehicle(vehicle))
+        {
+            Vector3 exitPos = vehicle.Position + vehicle.RightVector * -4.0f + vehicle.ForwardVector * -2.0f;
+            exitPos.Z = vehicle.Position.Z + 1.0f;
+            Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, officer.Handle, exitPos.X, exitPos.Y, exitPos.Z, true, true, true);
+            Script.Wait(50);
+        }
+
+        Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 32, true);
+        Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 281, true);
+        officer.BlockPermanentEvents = true;
+        Function.Call(Hash.SET_PED_KEEP_TASK, officer.Handle, true);
+        Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 429, true);
+
+        Log($"ForceOfficerOutOfVehicle completed for officer {officer.Handle}. In vehicle: {officer.IsInVehicle(vehicle)}");
+    }
+
+    private void SendPoliceAway()
+    {
+        Log("Sending police away naturally - returning to vehicle and driving off.");
+        
+        if (_policeVehicle == null || !_policeVehicle.Exists())
+        {
+            Log("No police vehicle to return to. Using emergency cleanup.");
+            CleanUpPolice(false);
+            return;
+        }
+
+        _policeVehicle.IsSirenActive = false;
+        _policeVehicle.IsEngineRunning = true;
+
+        foreach (Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive))
+        {
+            if (!officer.IsInVehicle(_policeVehicle))
+            {
+                Log($"Sending officer {officer.Handle} back to police vehicle.");
+                officer.BlockPermanentEvents = false;
+                Function.Call(Hash.SET_PED_CONFIG_FLAG, officer.Handle, 429, false);
+                officer.Task.EnterVehicle(_policeVehicle, VehicleSeat.Any);
+            }
+        }
+
+        Ped driver = _policeVehicle.Driver;
+        if (driver != null && driver.Exists() && driver.IsAlive && _respondingPolicePeds.Contains(driver))
+        {
+            Log($"Police driver {driver.Handle} is driving away from the scene.");
+            
+            Vector3 awayPosition = _policeVehicle.Position + _policeVehicle.ForwardVector * 500f;
+            Vector3 roadDestination = World.GetNextPositionOnStreet(awayPosition, true);
+            
+            if (roadDestination == Vector3.Zero)
+            {
+                roadDestination = _policeVehicle.Position + _policeVehicle.ForwardVector * 300f;
+            }
+            
+            driver.Task.DriveTo(_policeVehicle, roadDestination, 10f, 
+                              VehicleDrivingFlags.StopForVehicles, 
+                              PolicePatrolSpeed);
+            
+            Log($"Police departing to: {roadDestination}");
+        }
+        else
+        {
+            Log("No valid police driver found. Using emergency cleanup.");
+            CleanUpPolice(false);
+            return;
+        }
+
+        _policeVehicle.MarkAsNoLongerNeeded();
+        foreach (var officer in _respondingPolicePeds.Where(o => o != null && o.Exists()))
+        {
+            officer.MarkAsNoLongerNeeded();
+        }
+
+        _policeVehicle = null;
+        _respondingPolicePeds.Clear();
+        _policeDispatched = false;
+        _policeArrived = false;
+        PoliceCalled = false;
+        _violationLocation = Vector3.Zero;
+        
+        _officerLastTaskedTime.Clear();
+        _lastOfficerTaskTime = DateTime.MinValue;
+        ResetPoliceRedirectionStates();
+    }
+
+    private void CleanUpPolice(bool immediate = false) { 
+        Log("Emergency cleanup of police units - immediate removal.");
+        if (_policeVehicle != null && _policeVehicle.Exists()) {
+            _policeVehicle.MarkAsNoLongerNeeded();
+            if (immediate) _policeVehicle.Delete();
+            _policeVehicle = null;
+        }
+        foreach (var officer in _respondingPolicePeds) {
+            if (officer != null && officer.Exists()) {
+                officer.MarkAsNoLongerNeeded();
+                if (immediate) officer.Delete();
+            }
+        }
+        _respondingPolicePeds.Clear();
+        _policeDispatched = false; 
+        _policeArrived = false;
+        PoliceCalled = false; 
+        _violationLocation = Vector3.Zero;
+        
+        _officerLastTaskedTime.Clear();
+        _lastOfficerTaskTime = DateTime.MinValue;
+        
+        ResetPoliceRedirectionStates();
+        Log("Emergency police cleanup complete.");
+    }
+
+    private void EndPoliceInteraction(bool playerArrested = false, bool playerFled = false)
+    {
+        Log($"Ending police interaction. Player arrested: {playerArrested}, Player fled: {playerFled}");
+        
+        if (_playerControlDisabled) {
+            Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
+            _playerControlDisabled = false;
+            Log("Player control re-enabled during interaction end.");
+        }
+        
+        _policeInteractionActive = false;
+        _makingPoliceDecision = false;
+        _currentPoliceDecision = PoliceDecision.None;
+        _policeInteractionStage = 0;
+        _playerResponse = string.Empty;
+        _showingResponseMenu = false;
+        _selectedResponseIndex = 0;
+        
+        _fineAlreadyGiven = false;
+        _decisionMessageShown = false;
+        
+        if (playerArrested || playerFled) {
+            CleanUpPolice(playerArrested);
+        } else {
+            SendPoliceAway();
+        }
+    }
+
+    private void FullResetOfScriptStates() {
+        Log("Performing full reset of script states.");
+        
+        if (_playerControlDisabled) {
+            Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
+            _playerControlDisabled = false;
+            Log("Player control re-enabled during full reset.");
+        }
+        
+        EndPoliceInteraction(false, false); 
+        _violationLocation = Vector3.Zero;
+        _playerResponse = string.Empty;
+        _policeDispatched = false;
+        _policeArrived = false;
+        _policeInteractionActive = false;
+        _makingPoliceDecision = false;
+        PoliceCalled = false;
+        _showingResponseMenu = false;
+        _selectedResponseIndex = 0;
+        
+        _fineAlreadyGiven = false;
+        _decisionMessageShown = false;
+        
+        _officerLastTaskedTime.Clear();
+        _lastOfficerTaskTime = DateTime.MinValue;
+        _lastMenuDisplayTime = DateTime.MinValue;
+        
+        ResetPoliceRedirectionStates();
+        ResetNavigationTracking();
+        Log("Full reset complete.");
+    }
+
+    private void ResetPoliceRedirectionStates()
+    {
+        _navigationRetryCount = 0;
+        _lastPoliceRedirectionTime = DateTime.MinValue;
+        _lastPolicePosition = Vector3.Zero;
+        _policeStuckStartTime = DateTime.MinValue;
+        Log("Police redirection states reset.");
+    }
+
+    private void Log(string message) {
+        try { 
+            string logPath = Path.Combine("scripts", "TrafficLightViolation.log");
+            Directory.CreateDirectory("scripts");
+            File.AppendAllText(logPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " : " + message + Environment.NewLine); 
+            
+            GTA.UI.Screen.ShowSubtitle($"LOG: {message}", 2000);
+        }
+        catch (Exception ex) { 
+            GTA.UI.Notification.PostTicker($"Log Error: {ex.Message}", false, false); 
+            GTA.UI.Screen.ShowSubtitle($"LOG ERROR: {ex.Message}", 5000);
+        }
+    }
+
+    private void OnKeyDown(object sender, KeyEventArgs e)
+    {
+        Ped player = Game.Player.Character;
+        if (player == null || !player.Exists()) return;
+        
+        if (_showingResponseMenu && _policeInteractionActive)
+        {
+            switch (e.KeyCode)
+            {
+                case Keys.Up:
+                    _selectedResponseIndex = (_selectedResponseIndex - 1 + _responseOptions.Length) % _responseOptions.Length;
+                    Log($"Menu navigation: Selected option {_selectedResponseIndex + 1}");
+                    break;
+                    
+                case Keys.Down:
+                    _selectedResponseIndex = (_selectedResponseIndex + 1) % _responseOptions.Length;
+                    Log($"Menu navigation: Selected option {_selectedResponseIndex + 1}");
+                    break;
+                    
+                case Keys.Enter:
+                    SelectResponse();
+                    break;
+                    
+                case Keys.D1:
+                case Keys.NumPad1:
+                    _selectedResponseIndex = 0;
+                    SelectResponse();
+                    break;
+                    
+                case Keys.D2:
+                case Keys.NumPad2:
+                    _selectedResponseIndex = 1;
+                    SelectResponse();
+                    break;
+                    
+                case Keys.D3:
+                case Keys.NumPad3:
+                    _selectedResponseIndex = 2;
+                    SelectResponse();
+                    break;
+                    
+                case Keys.D4:
+                case Keys.NumPad4:
+                    _selectedResponseIndex = 3;
+                    SelectResponse();
+                    break;
+                    
+                case Keys.D5:
+                case Keys.NumPad5:
+                    _selectedResponseIndex = 4;
+                    SelectResponse();
+                    break;
+            }
+            return;
+        }
+
+        // Debug keys pour les tests
+        if (e.KeyCode == Keys.T) {
+            Log("Test Key T: Simulating red light violation for interaction test.");
+            if(player.IsInVehicle()) { player.Task.LeaveVehicle(); Script.Wait(1500); } 
+            
+            FullResetOfScriptStates(); 
+
+            _violationLocation = player.Position + player.ForwardVector * 5f;
+            PoliceCalled = true; 
+            _stateTimer = DateTime.Now; 
+            Log("Test key: PoliceCalled=true for traffic violation. Dispatch should occur on next tick.");
+        }
+        if (e.KeyCode == Keys.R) {
+            Log("Test Key R: Forcing Full Reset of Script States.");
+            FullResetOfScriptStates();
+        }
+    }
+} 

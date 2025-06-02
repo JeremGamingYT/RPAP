@@ -1,10 +1,12 @@
 C:\Users\letil\Documents\CursorProjects\RPAP\bin\Debug\net48\REALIS.dll
 C:\Users\letil\Documents\CursorProjects\RPAP\bin\Debug\net48\REALIS.pdb
+C:\Users\letil\Documents\CursorProjects\RPAP\bin\Debug\net48\Newtonsoft.Json.dll
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.csproj.AssemblyReference.cache
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.AssemblyInfoInputs.cache
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.AssemblyInfo.cs
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.csproj.CoreCompileInputs.cache
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.sourcelink.json
+C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.csproj.Up2Date
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.dll
 C:\Users\letil\Documents\CursorProjects\RPAP\obj\Debug\net48\REALIS.pdb
