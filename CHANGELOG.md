@@ -1,5 +1,11 @@
 # NPCRoadRage Script - Changelog
 
+## Version 1.27 - Enhanced NPC Intelligence (2025-06-02)
+
+### 🤖 PNJ plus intelligents hors traffic
+- Nouveau dossier `NPCIntelligence` avec gestionnaire dédié.
+- Les PNJ fuient ou appellent la police lorsqu'ils sont menacés.
+
 
 ## Version 1.26 - Intelligent Traffic AI (2025-06-01)
 
