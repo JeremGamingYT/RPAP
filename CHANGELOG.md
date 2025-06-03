@@ -1,5 +1,13 @@
 # NPCRoadRage Script - Changelog
 
+
+## Version 1.26 - Intelligent Traffic AI (2025-06-01)
+
+### 🚗 PNJ plus dynamiques dans les embouteillages
+- Nouveau dossier `TrafficAI` avec un gestionnaire dédié.
+- Les véhicules PNJ bloqués klaxonnent après quelques secondes.
+- Ils tentent ensuite de contourner l'obstacle pour continuer leur route.
+
 ## Version 1.24.1 - Compilation Fixes (2025-05-30)
 
 ### 🔧 **Correctifs de compilation pour SHVDN v3**
