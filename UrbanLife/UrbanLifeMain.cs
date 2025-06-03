@@ -8,6 +8,9 @@ using System.Windows.Forms;
 
 namespace REALIS.UrbanLife
 {
+    // Import pour RoadEventType
+    using static RoadEventManager;
+    
     public class UrbanLifeMain : Script
     {
         private NPCRoutineManager routineManager;
@@ -25,6 +28,7 @@ namespace REALIS.UrbanLife
         private DateTime lastUpdate = DateTime.Now;
         private DateTime lastDebugUpdate = DateTime.Now;
         private DateTime lastErrorNotification = DateTime.Now;
+        private DateTime lastGKeyPress = DateTime.Now;
         
         public UrbanLifeMain()
         {
@@ -83,16 +87,43 @@ namespace REALIS.UrbanLife
         {
             try
             {
+                // Vérification de sécurité globale
+                var player = Game.Player.Character;
+                if (player == null || !player.Exists() || player.IsDead)
+                {
+                    return;
+                }
+
                 if (e.KeyCode == System.Windows.Forms.Keys.F8)
                 {
                     ShowDebugInfo();
                 }
                 else if (e.KeyCode == System.Windows.Forms.Keys.F9)
                 {
-                    // Réinitialiser le système
-                    UrbanLifeIntegration.ReleaseAllNPCs();
-                    smartNPCs.Clear();
-                    GTA.UI.Notification.PostTicker("~y~Système UrbanLife réinitialisé", false);
+                    // CORRECTION F9: Réinitialisation sécurisée avec cooldown
+                    try
+                    {
+                        // Vérifier si on peut faire une réinitialisation (éviter les spams)
+                        if (roadEventManager != null)
+                        {
+                            roadEventManager.ClearAllEvents();
+                        }
+                        
+                        UrbanLifeIntegration.ReleaseAllNPCs();
+                        smartNPCs.Clear();
+                        
+                        // Forcer un délai avant que F7 ne puisse être utilisé
+                        GTA.UI.Notification.PostTicker("~y~Système UrbanLife réinitialisé - Attendez 3 secondes avant F7", false);
+                        
+                        // Programmer un délai sécurisé
+                        System.Threading.Tasks.Task.Delay(3000).ContinueWith(_ => {
+                            GTA.UI.Notification.PostTicker("~g~F7 maintenant disponible", false);
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        GTA.UI.Notification.PostTicker($"~r~Erreur F9: {ex.Message}", false);
+                    }
                 }
                 else if (e.KeyCode == System.Windows.Forms.Keys.F10)
                 {
@@ -122,39 +153,193 @@ namespace REALIS.UrbanLife
                 }
                 else if (e.KeyCode == System.Windows.Forms.Keys.F7)
                 {
-                    // Créer un mini-événement routier aléatoire
+                    // CORRECTION F7: Protection contre les crashes à répétition
                     try
                     {
-                        var player = Game.Player.Character;
-                        if (player?.CurrentVehicle != null)
+                        // Vérifications de sécurité renforcées
+                        if (roadEventManager == null)
                         {
-                            // Forcer immédiatement la création d'un événement routier
-                            bool eventCreated = roadEventManager.ForceCreateRoadEvent();
-                            
-                            if (eventCreated)
-                            {
-                                GTA.UI.Notification.PostTicker("~g~Mini-événement routier créé devant vous!", false);
-                                GTA.UI.Screen.ShowSubtitle("~g~Regardez votre mini-map et roulez en avant!", 4000);
-                            }
-                            else
-                            {
-                                GTA.UI.Notification.PostTicker("~y~Impossible de créer un événement maintenant. Réessayez.", false);
-                            }
+                            GTA.UI.Notification.PostTicker("~r~Système d'événements non initialisé!", false);
+                            return;
+                        }
+
+                        // Vérifier si le joueur est dans un véhicule SEULEMENT pour la recommandation
+                        if (player?.CurrentVehicle == null)
+                        {
+                            // Permettre la création même hors véhicule mais avertir
+                            GTA.UI.Notification.PostTicker("~y~Recommandé: Soyez dans un véhicule pour de meilleurs événements", false);
+                        }
+                        
+                        // Vérifier l'état du RoadEventManager avant l'appel
+                        var activeEventsCount = roadEventManager.GetActiveEvents()?.Count ?? 0;
+                        if (activeEventsCount >= 3)
+                        {
+                            GTA.UI.Notification.PostTicker("~y~Trop d'événements actifs! Attendez qu'ils se terminent.", false);
+                            return;
+                        }
+
+                        // Appel sécurisé avec gestion d'erreur
+                        bool eventCreated = roadEventManager.ForceCreateRoadEvent();
+                        
+                        if (eventCreated)
+                        {
+                            GTA.UI.Notification.PostTicker("~g~Mini-événement routier créé!", false);
+                            GTA.UI.Screen.ShowSubtitle("~g~Regardez votre mini-map pour localiser l'événement!", 4000);
                         }
                         else
                         {
-                            GTA.UI.Notification.PostTicker("~r~Vous devez être dans un véhicule pour créer des événements routiers!", false);
+                            GTA.UI.Notification.PostTicker("~y~Impossible de créer un événement maintenant. Conditions non remplies.", false);
                         }
                     }
                     catch (Exception ex)
                     {
-                        GTA.UI.Notification.PostTicker($"~r~Erreur F7: {ex.Message}", false);
+                        GTA.UI.Notification.PostTicker($"~r~Erreur F7 sécurisée: {ex.Message}", false);
+                        // Log l'erreur pour debug mais ne pas crasher
+                        System.IO.File.AppendAllText("UrbanLife_F7_errors.log", 
+                            $"{DateTime.Now}: F7 Error - {ex.Message}\n{ex.StackTrace}\n\n");
+                    }
+                }
+                else if (e.KeyCode == System.Windows.Forms.Keys.G)
+                {
+                    // NOUVELLE GESTION DE LA TOUCHE G - Plus flexible et sécurisée
+                    try
+                    {
+                        HandleGKeyPress();
+                    }
+                    catch (Exception ex)
+                    {
+                        GTA.UI.Notification.PostTicker($"~r~Erreur G sécurisée: {ex.Message}", false);
                     }
                 }
             }
             catch (Exception ex)
             {
-                GTA.UI.Notification.PostTicker($"~r~Erreur touches: {ex.Message}", false);
+                GTA.UI.Notification.PostTicker($"~r~Erreur touches globale: {ex.Message}", false);
+            }
+        }
+        
+        /// <summary>
+        /// Gestion sécurisée de la touche G
+        /// </summary>
+        private void HandleGKeyPress()
+        {
+            try
+            {
+                var player = Game.Player.Character;
+                if (player?.Exists() != true)
+                {
+                    return;
+                }
+
+                // NOUVEAU: Cooldown pour éviter le spam de la touche G
+                var now = DateTime.Now;
+                if ((now - lastGKeyPress).TotalSeconds < 1.5) // 1.5 secondes entre chaque appui
+                {
+                    GTA.UI.Notification.PostTicker("~y~Attendez un moment avant de refaire G", false);
+                    return;
+                }
+                lastGKeyPress = now;
+
+                // CORRECTION: Vérifications de sécurité du RoadEventManager
+                if (roadEventManager == null)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Système d'événements non initialisé!", false);
+                    return;
+                }
+
+                // Vérifier s'il y a des événements de panne actifs
+                List<RoadEvent>? activeEvents = null;
+                try
+                {
+                    activeEvents = roadEventManager.GetActiveEvents()?.Where(e => 
+                        e?.Type == RoadEventType.BrokenDownVehicle && 
+                        e.CanInteract &&
+                        e.Position.DistanceTo(player.Position) <= 10.0f) // Distance augmentée de 8 à 10
+                        .ToList();
+                }
+                catch (Exception)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Erreur lors de la vérification des événements", false);
+                    return;
+                }
+
+                if (activeEvents == null || !activeEvents.Any())
+                {
+                    GTA.UI.Notification.PostTicker("~y~Aucun événement de panne proche pour utiliser G", false);
+                    return;
+                }
+
+                var nearestEvent = activeEvents.OrderBy(e => e?.Position.DistanceTo(player.Position) ?? float.MaxValue).FirstOrDefault();
+                
+                // NOUVELLE PROTECTION: Vérifier que l'événement est valide
+                if (nearestEvent?.Position == null)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Événement invalide", false);
+                    return;
+                }
+
+                // Vérifier que l'événement a un conducteur valide
+                if (nearestEvent.Participants?.Count == 0 || 
+                    nearestEvent.Participants?[0]?.Exists() != true ||
+                    nearestEvent.Participants?[0]?.IsDead == true)
+                {
+                    GTA.UI.Notification.PostTicker("~r~Aucun conducteur disponible", false);
+                    return;
+                }
+
+                // CORRECTION: Appel sécurisé avec gestion d'erreur et vérification des méthodes
+                try
+                {
+                    var offerRideMethod = roadEventManager.GetType()
+                        .GetMethod("OfferRideToDriver", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    
+                    if (offerRideMethod == null)
+                    {
+                        GTA.UI.Notification.PostTicker("~r~Méthode OfferRideToDriver non trouvée", false);
+                        return;
+                    }
+                    
+                    offerRideMethod.Invoke(roadEventManager, new object[] { nearestEvent });
+                    GTA.UI.Notification.PostTicker("~g~Aide proposée au conducteur", false);
+                }
+                catch (System.Reflection.TargetInvocationException ex)
+                {
+                    // Capturer les exceptions spécifiques de réflexion
+                    var innerEx = ex.InnerException ?? ex;
+                    GTA.UI.Notification.PostTicker($"~r~Erreur d'aide: {innerEx.Message}", false);
+                    
+                    // Log l'erreur
+                    try
+                    {
+                        System.IO.File.AppendAllText("UrbanLife_G_key_error.log", 
+                            $"{DateTime.Now}: G Key Error - {innerEx.Message}\n{innerEx.StackTrace}\n\n");
+                    }
+                    catch { }
+                }
+                catch (Exception ex)
+                {
+                    GTA.UI.Notification.PostTicker($"~r~Erreur générale: {ex.Message}", false);
+                    
+                    // Log l'erreur
+                    try
+                    {
+                        System.IO.File.AppendAllText("UrbanLife_G_key_error.log", 
+                            $"{DateTime.Now}: G Key General Error - {ex.Message}\n{ex.StackTrace}\n\n");
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Protection de dernier recours
+                GTA.UI.Notification.PostTicker("~r~Erreur critique touche G", false);
+                
+                try
+                {
+                    System.IO.File.AppendAllText("UrbanLife_G_key_critical.log", 
+                        $"{DateTime.Now}: G Key Critical Error - {ex.Message}\n{ex.StackTrace}\n\n");
+                }
+                catch { }
             }
         }
         
