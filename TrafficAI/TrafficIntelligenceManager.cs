@@ -76,7 +76,7 @@ namespace REALIS.TrafficAI
 
             if (info.BlockedTime > HonkDelay && !info.Honked)
             {
-                Function.Call(Hash.START_VEHICLE_HORN, veh, 1000, Hash.NORMAL, false);
+                Function.Call(Hash.START_VEHICLE_HORN, veh, 1000, 0, false);
                 info.Honked = true;
             }
 
@@ -92,8 +92,8 @@ namespace REALIS.TrafficAI
         {
             Vector3 start = veh.Position + veh.ForwardVector * 2f + Vector3.WorldUp;
             Vector3 end = start + veh.ForwardVector * 5f;
-            var hit = World.Raycast(start, end, IntersectOptions.Map | IntersectOptions.Objects | IntersectOptions.Vehicles | IntersectOptions.Peds, veh);
-            return hit.DitHit && hit.HitEntity != null && hit.HitEntity.Handle != veh.Handle;
+            var hit = World.Raycast(start, end, IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds, veh);
+            return hit.DidHit && hit.HitEntity != null && hit.HitEntity.Handle != veh.Handle;
         }
 
         private void AttemptBypass(Ped driver, Vehicle veh)
@@ -107,8 +107,8 @@ namespace REALIS.TrafficAI
 
         private bool IsPathClear(Vector3 position)
         {
-            var hit = World.Raycast(position + Vector3.WorldUp * 2f, position, IntersectOptions.Map | IntersectOptions.Objects | IntersectOptions.Vehicles);
-            return !hit.DitHit;
+            var hit = World.Raycast(position + Vector3.WorldUp * 2f, position, IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles);
+            return !hit.DidHit;
         }
     }
 }
