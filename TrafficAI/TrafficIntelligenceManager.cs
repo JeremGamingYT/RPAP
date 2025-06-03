@@ -78,6 +78,7 @@ namespace REALIS.TrafficAI
             {
                 int hornMode = Function.Call<int>(Hash.GET_HASH_KEY, "NORMAL");
                 Function.Call(Hash.START_VEHICLE_HORN, veh, 1000, hornMode, false);
+                Function.Call(Hash.START_VEHICLE_HORN, veh, 1000, 0, false);
                 info.Honked = true;
             }
 
