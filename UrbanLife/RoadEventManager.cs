@@ -1057,7 +1057,6 @@ namespace REALIS.UrbanLife
                                         driver.BlockPermanentEvents = true;
                                         driver.CanBeDraggedOutOfVehicle = false;
                                         driver.KnockOffVehicleType = KnockOffVehicleType.Never;
-                                        driver.CanBeKnockedOffBike = false;
                                         driver.CanBeTargetted = false; // Éviter interactions externes
                                         
                                         // NOUVEAU: Appliquer plusieurs fois pour s'assurer que ça tient
@@ -1222,7 +1221,6 @@ namespace REALIS.UrbanLife
                                 driver.BlockPermanentEvents = true;
                                 driver.CanBeDraggedOutOfVehicle = false;
                                 driver.KnockOffVehicleType = KnockOffVehicleType.Never;
-                                driver.CanBeKnockedOffBike = false;
                                 driver.CanBeTargetted = false;
                                 
                                 // NOUVEAU: Si le PNJ sort pendant la période de grâce, le remettre immédiatement
@@ -1331,7 +1329,6 @@ namespace REALIS.UrbanLife
                                 driver.BlockPermanentEvents = true;
                                 driver.CanBeDraggedOutOfVehicle = false;
                                 driver.KnockOffVehicleType = KnockOffVehicleType.Never;
-                                driver.CanBeKnockedOffBike = false;
                                 driver.CanBeTargetted = false;
                             }
                             
@@ -1433,7 +1430,6 @@ namespace REALIS.UrbanLife
                                     driver.BlockPermanentEvents = true;
                                     driver.CanBeDraggedOutOfVehicle = false;
                                     driver.KnockOffVehicleType = KnockOffVehicleType.Never;
-                                    driver.CanBeKnockedOffBike = false;
                                     driver.CanBeTargetted = false;
                                     
                                     // NOUVEAU: Double application des protections avec délai
@@ -2835,7 +2831,6 @@ namespace REALIS.UrbanLife
                                         driver.BlockPermanentEvents = true;
                                         driver.CanBeDraggedOutOfVehicle = false;
                                         driver.KnockOffVehicleType = KnockOffVehicleType.Never;
-                                        driver.CanBeKnockedOffBike = false;
                                         driver.CanBeTargetted = false;
                                         
                                         GTA.UI.Notification.PostTicker("~r~CORRECTION: Le passager remonte automatiquement!", false);
