@@ -131,6 +131,8 @@ namespace REALIS.TrafficAI
                 ignore);
             var (_, res) = test.GetResult();
             return !res.DidHit;
+            var result = test.GetResult();
+            return !result.DidHit;
         }
 
         private void YieldNearbyTraffic(Vehicle blockedVeh)
