@@ -1,5 +1,22 @@
 # NPCRoadRage Script - Changelog
 
+## Version 1.27.2 - NPCIntelligence Build Cleanup (2025-06-04)
+
+### ✅ Compilation
+- Suppression de la variable inutile `playerShooting` qui provoquait une erreur de compilation
+
+## Version 1.27.1 - NPCIntelligence Build Fix (2025-06-03)
+
+### 🛠️ Correction de build
+- Utilisation correcte de `Game.Player.Wanted` pour ajuster le niveau de recherche
+- Suppression d'un appel invalide `IsFiringWeapon` sur `Ped`
+
+## Version 1.27 - Enhanced NPC Intelligence (2025-06-02)
+
+### 🤖 PNJ plus intelligents hors traffic
+- Nouveau dossier `NPCIntelligence` avec gestionnaire dédié.
+- Les PNJ fuient ou appellent la police lorsqu'ils sont menacés.
+
 
 ## Version 1.26 - Intelligent Traffic AI (2025-06-01)
 
