@@ -46,7 +46,7 @@ namespace REALIS.Common
             }
             catch (Exception ex)
             {
-                GTA.UI.Notification.Show($"Coordinator error: {ex.Message}");
+                GTA.UI.Notification.PostTicker($"Coordinator error: {ex.Message}", false);
             }
         }
     }
