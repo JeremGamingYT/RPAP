@@ -30,6 +30,11 @@ public class CriminalRecordIntegration : Script
     private const float SPEED_LIMIT_CITY = 50f;    // km/h
     private const float SPEED_CHECK_INTERVAL = 2f; // seconds
     private const float VEHICLE_CHECK_INTERVAL = 1f; // seconds
+
+    public void SetCriminalSystem(CriminalRecordSystem system)
+    {
+        _criminalSystem = system;
+    }
     
     public CriminalRecordIntegration()
     {
@@ -39,13 +44,12 @@ public class CriminalRecordIntegration : Script
     
     private void WaitForCriminalSystem(object sender, EventArgs e)
     {
-        // Simple approach - just try to find if any criminal record system exists
-        // In practice, you would implement a better discovery mechanism
-        _criminalSystem = null; // Will be set when found
-        
+        if (_criminalSystem == null)
+            return;
+
         Tick -= WaitForCriminalSystem;
         Tick += OnTick;
-        Log("Criminal Record Integration initialized (simplified mode).");
+        Log("Criminal Record Integration initialized.");
     }
     
     private void OnTick(object sender, EventArgs e)

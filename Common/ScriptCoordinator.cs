@@ -2,6 +2,7 @@ using GTA;
 using System;
 using REALIS.TrafficAI;
 using REALIS.UrbanLife;
+using RPAP;
 
 namespace REALIS.Common
 {
@@ -13,11 +14,25 @@ namespace REALIS.Common
     {
         private readonly TrafficIntelligenceManager _trafficAI;
         private readonly UrbanLifeMain _urbanLife;
+        private readonly RealisticFuelSystem _fuelSystem;
+        private readonly RealisticVehicleHandling _vehicleHandling;
+        private readonly RealisticVehicleIntegrity _vehicleIntegrity;
+        private readonly RealisticTyreWearAndTemperature _tyreWear;
+        private readonly CriminalRecordSystem _criminalRecord;
+        private readonly CriminalRecordIntegration _criminalIntegration;
 
         public ScriptCoordinator()
         {
             _trafficAI = new TrafficIntelligenceManager();
             _urbanLife = new UrbanLifeMain();
+
+            _fuelSystem = new RealisticFuelSystem();
+            _vehicleHandling = new RealisticVehicleHandling();
+            _vehicleIntegrity = new RealisticVehicleIntegrity();
+            _tyreWear = new RealisticTyreWearAndTemperature();
+            _criminalRecord = new CriminalRecordSystem();
+            _criminalIntegration = new CriminalRecordIntegration();
+            _criminalIntegration.SetCriminalSystem(_criminalRecord);
 
             Tick += OnTick;
             Interval = 1000;
