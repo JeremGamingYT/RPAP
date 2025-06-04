@@ -10,6 +10,7 @@ using REALIS.Common;
 /// Intégration du système de casier judiciaire avec les autres mods existants
 /// Cette classe surveille automatiquement les actions du joueur et enregistre les crimes
 /// </summary>
+[ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
 public class CriminalRecordIntegration : Script
 {
     private CriminalRecordSystem? _criminalSystem;

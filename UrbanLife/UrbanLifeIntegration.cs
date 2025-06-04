@@ -52,27 +52,21 @@ namespace REALIS.UrbanLife
         }
         
         /// <summary>
-        /// Vérifie si un PNJ est occupé par un autre système
+        /// Vérifie si un PNJ est déjà utilisé par un autre système
         /// </summary>
         public static bool IsNPCBusy(Ped ped)
         {
-            if (ped == null || !ped.Exists()) return true;
-            
-            // Vérifier si c'est le joueur
-            if (ped.IsPlayer) return true;
-            
-            // Vérifier si c'est un PNJ de police (utilisé par NPCRoadRage)
-            if (IsPolicePed(ped)) return true;
-            
-            // Vérifier si impliqué dans un incident de NPCRoadRage
-            if (IsInvolvedInRoadRageIncident(ped)) return true;
-            
-            // Vérifier si en mission ou combat
-            if (ped.IsInCombat || ped.IsFleeing) return true;
-            
-            // Vérifier si a des tâches importantes en cours
+            if (!ped.Exists() || ped.IsDead) return true;
+
+            // Vérifier si réservé par UrbanLife
+            if (reservedNPCs.Contains(ped.Handle)) return true;
+
+            // Vérifier si c'est un PNJ de police (généralement occupé)
+            if (IsPoliceOfficer(ped)) return true;
+
+            // Vérifier si le PNJ a des tâches importantes
             if (HasImportantTasks(ped)) return true;
-            
+
             return false;
         }
         
@@ -104,77 +98,46 @@ namespace REALIS.UrbanLife
         }
         
         /// <summary>
-        /// Vérifie si c'est un PNJ de police
+        /// Vérifie si le PNJ est un officier de police
         /// </summary>
-        private static bool IsPolicePed(Ped ped)
+        private static bool IsPoliceOfficer(Ped ped)
         {
-            var policeHashes = new[]
-            {
-                PedHash.Cop01SFY, PedHash.Cop01SMY, PedHash.Sheriff01SFY, PedHash.Sheriff01SMY,
-                PedHash.Swat01SMY, PedHash.Security01SMM, PedHash.Armoured01SMM,
-                PedHash.Paramedic01SMM
-            };
-            
-            return policeHashes.Contains((PedHash)ped.Model.Hash);
+            var pedHash = (GTA.PedHash)ped.Model.Hash;
+            return pedHash == GTA.PedHash.Cop01SFY || 
+                   pedHash == GTA.PedHash.Cop01SMY || 
+                   pedHash == GTA.PedHash.Sheriff01SFY ||
+                   pedHash == GTA.PedHash.Sheriff01SMY;
         }
         
         /// <summary>
-        /// Vérifie si le PNJ est impliqué dans un incident NPCRoadRage
-        /// </summary>
-        private static bool IsInvolvedInRoadRageIncident(Ped ped)
-        {
-            // Vérifier via réflexion si NPCRoadRage est actif et utilise ce PNJ
-            try
-            {
-                // Accès à la classe NPCRoadRage via réflexion pour éviter les dépendances directes
-                var npcRoadRageType = Type.GetType("NPCRoadRage");
-                if (npcRoadRageType != null)
-                {
-                    var policeCalledField = npcRoadRageType.GetField("PoliceCalled", 
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    
-                    if (policeCalledField != null && (bool)policeCalledField.GetValue(null))
-                    {
-                        // Si la police est appelée, ne pas interférer avec les PNJ proches du joueur
-                        var player = Game.Player.Character;
-                        if (player != null && ped.Position.DistanceTo(player.Position) < 100.0f)
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // En cas d'erreur, jouer la sécurité
-            }
-            
-            return false;
-        }
-        
-        /// <summary>
-        /// Vérifie si le PNJ a des tâches importantes
+        /// Vérifie si le PNJ a des tâches importantes en cours
         /// </summary>
         private static bool HasImportantTasks(Ped ped)
         {
-            // Vérifier les animations importantes
-            if (Function.Call<bool>(Hash.IS_ENTITY_PLAYING_ANIM, ped, "mp_arresting", "idle", 3) ||
-                Function.Call<bool>(Hash.IS_ENTITY_PLAYING_ANIM, ped, "cellphone@", "cellphone_call_listen_base", 3))
+            try
             {
-                return true;
-            }
-            
-            // Vérifier si en train de conduire de manière urgente
-            if (ped.IsInVehicle() && ped.CurrentVehicle != null)
-            {
-                var vehicle = ped.CurrentVehicle;
-                if (vehicle.IsSirenActive || vehicle.Speed > 20.0f)
+                // Vérifier si le PNJ est en mission critique
+                if (ped.IsInCombat || ped.IsBeingStunned || ped.IsRagdoll) return true;
+
+                // Vérifier si dans un véhicule avec une mission spéciale
+                if (ped.IsInVehicle() && ped.CurrentVehicle != null)
                 {
-                    return true;
+                    var vehicle = ped.CurrentVehicle;
+                    
+                    // Véhicules d'urgence ou de police
+                    if (vehicle.ClassType == VehicleClass.Emergency ||
+                        vehicle.HasSiren)
+                    {
+                        return true;
+                    }
                 }
+
+                return false;
             }
-            
-            return false;
+            catch
+            {
+                return true; // En cas d'erreur, considérer comme occupé
+            }
         }
         
         /// <summary>

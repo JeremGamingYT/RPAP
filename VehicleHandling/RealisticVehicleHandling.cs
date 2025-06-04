@@ -8,6 +8,10 @@ using System.Text;
 using RealHandlingLib;
 using System.Collections.Generic;
 
+/// <summary>
+/// Système de gestion réaliste du comportement des véhicules
+/// </summary>
+[ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
 public class RealisticVehicleHandling : Script
 {
     private Vehicle? lastVehicle;

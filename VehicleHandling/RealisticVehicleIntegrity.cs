@@ -5,6 +5,10 @@ using RealHandlingLib;
 
 namespace RPAP
 {
+    /// <summary>
+    /// Système d'intégrité réaliste des véhicules
+    /// </summary>
+    [ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
     public class RealisticVehicleIntegrity : Script
     {
         private readonly Dictionary<int,float> burningTimers = new();

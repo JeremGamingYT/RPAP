@@ -9,6 +9,10 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Reflection;
 
+/// <summary>
+/// Système réaliste d'usure et de température des pneus
+/// </summary>
+[ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
 public sealed class RealisticTyreWearAndTemperature : Script
 {
     /* ─────────── PARAMS & STATE ─────────── */

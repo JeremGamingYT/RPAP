@@ -11,6 +11,10 @@ using System.Linq;
 using REALIS.Common;
 using RealHandlingLib;   // ← ajoute cette ligne
 
+/// <summary>
+/// Système de carburant réaliste pour les véhicules
+/// </summary>
+[ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
 public class RealisticFuelSystem : Script
 {
     // Configuration du système de carburant
@@ -922,7 +926,7 @@ public class RealisticFuelSystem : Script
     
     private float CalculateFuelConsumption(Vehicle vehicle)
     {
-        // Consommation de base (réglée un peu plus bas que ta valeur d’origine)
+        // Consommation de base (réglée un peu plus bas que ta valeur d'origine)
         //const float baseRate = 0.006f;            // litres / s @ 60 km/h
         float consumption = fuelConsumptionBaseRate * (consumptionUpdateInterval / 1000f);
 

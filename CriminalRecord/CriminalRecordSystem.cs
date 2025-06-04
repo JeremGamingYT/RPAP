@@ -9,6 +9,10 @@ using System.Linq;
 using System.Drawing;
 using System.Windows.Forms;
 
+/// <summary>
+/// Système de casier judiciaire pour GTA 5
+/// </summary>
+[ScriptAttributes(NoDefaultInstance = true)] // Géré par ScriptCoordinator
 public class CriminalRecordSystem : Script
 {
     // --- Configuration ---

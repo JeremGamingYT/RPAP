@@ -380,11 +380,6 @@ namespace REALIS.UrbanLife
             // Mettre à jour le système d'intervention du joueur
             interventionSystem.Update();
             
-            // Vérifier les événements NPCRoadRage
-            // Désactivé car la détection peut provoquer un crash
-            //NPCRoadRageIntegration.CheckForRoadRageEvents();
-            //NPCRoadRageIntegration.DetectCollisionEvents();
-            
             // Vérifier les événements spéciaux (garder pour compatibilité mais réduire la fréquence)
             CheckForSpecialEvents();
             
