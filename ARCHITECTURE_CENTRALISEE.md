@@ -30,6 +30,7 @@ L'ancienne architecture décentralisée causait plusieurs problèmes critiques :
 - Coordination de tous les modules
 - Gestion des verrous sur les véhicules
 - Système de verrous avec priorité (TrafficAI prioritaire)
+- Cooldown de 250 ms entre deux verrous pour éviter le spam
 - Distribution des événements
 - Nettoyage automatique des ressources
 

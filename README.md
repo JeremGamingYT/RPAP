@@ -11,3 +11,4 @@ Ce dépôt contient divers scripts pour GTA V.
 * L'intégration `NPCRoadRage` est maintenant désactivée afin d'éviter les plantages quand on croise d'autres véhicules.
 * Système de verrous prioritaire : `TrafficAI` prend toujours la main sur les véhicules.
 * Nouveau système de logs détaillés : toutes les erreurs importantes sont enregistrées dans `REALIS.log`.
+* Cooldown de 250 ms sur les verrous pour éviter les conflits lors des appuis répétés sur les touches.
