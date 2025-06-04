@@ -48,6 +48,7 @@ namespace REALIS.NPCIntelligence
         private void UpdatePed(Ped ped, Ped player, NPCStatusInfo info)
         {
             bool beingAimedAt = Function.Call<bool>(Hash.IS_PLAYER_FREE_AIMING_AT_ENTITY, Game.Player, ped);
+            bool playerShooting = player.IsShooting;
             bool playerShooting = player.IsShooting || player.IsFiringWeapon;
             bool closeThreat = player.Position.DistanceTo(ped.Position) < ThreatRadius;
 
@@ -74,6 +75,12 @@ namespace REALIS.NPCIntelligence
 
         private void CallPolice(Ped caller)
         {
+            GTA.Wanted wanted = Game.Player.Wanted;
+            if (wanted.WantedLevel < 2)
+            {
+                wanted.SetWantedLevel(2, false);
+                wanted.ApplyWantedLevelChangeNow(false);
+            }
             if (Game.Player.WantedLevel < 2)
                 Game.Player.WantedLevel = 2;
             Function.Call(Hash.PLAY_SOUND_FRONTEND, -1, "Cell_Call_To", "Phone_SoundSet", false);
