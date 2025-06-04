@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
+using REALIS.Common;
 
 namespace REALIS.UrbanLife
 {
@@ -247,7 +248,7 @@ namespace REALIS.UrbanLife
                 }
                 
                 // Méthode 3: Vérifier le trafic dans la zone (réduit le rayon)
-                var nearbyVehicles = World.GetNearbyVehicles(position, 50.0f);
+                var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(position, 50.0f);
                 if (nearbyVehicles.Length >= 1)
                 {
                     return true;
