@@ -17,6 +17,9 @@ namespace REALIS.TrafficAI
         private readonly Dictionary<int, BlockedVehicleInfo> _tracked = new();
         private readonly HashSet<int> _processingVehicles = new(); // Prévient les doubles traitements
         private readonly Dictionary<int, DateTime> _lastActionTime = new(); // Cooldown par véhicule
+
+        // Gestion du nettoyage des entrées trop anciennes
+        private const float TrackingTimeout = 30f; // secondes
         
         // Configuration avancée
         private const float CheckRadius = 40f;
@@ -72,6 +75,7 @@ namespace REALIS.TrafficAI
                 if ((DateTime.Now - _lastCleanup).TotalSeconds > 10)
                 {
                     CleanupInvalidEntries();
+                    CleanupStaleEntries();
                     _lastCleanup = DateTime.Now;
                 }
             }
@@ -118,6 +122,8 @@ namespace REALIS.TrafficAI
                     info = new BlockedVehicleInfo(veh.Driver, veh);
                     _tracked[veh.Handle] = info;
                 }
+
+                info.LastSeen = DateTime.Now;
 
                 UpdateVehicleIntelligently(info, playerVehicle);
             }
@@ -198,6 +204,9 @@ namespace REALIS.TrafficAI
 
             // Raycast multi-directionnel pour détecter les obstacles
             analysis.IsBlocked = IsPathBlocked(veh, veh.ForwardVector, 12f);
+
+            // Compte les véhicules lents ou à l'arrêt devant pour détecter un embouteillage
+            analysis.IsInTrafficJam = CountFrontVehicles(veh) > 2;
             
             if (analysis.IsBlocked)
             {
@@ -232,6 +241,32 @@ namespace REALIS.TrafficAI
             }
         }
 
+        private int CountFrontVehicles(Vehicle veh)
+        {
+            try
+            {
+                var nearby = World.GetNearbyVehicles(veh.Position, 12f);
+                if (nearby == null) return 0;
+
+                int count = 0;
+                foreach (var other in nearby)
+                {
+                    if (other == veh || other.Driver == null || !other.Driver.IsAlive)
+                        continue;
+
+                    Vector3 dir = (other.Position - veh.Position).Normalized;
+                    if (Vector3.Dot(veh.ForwardVector, dir) > 0.5f && other.Speed < 2f)
+                        count++;
+                }
+
+                return count;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         private BypassDirection DetermineOptimalDirection(Vehicle veh, BlockageAnalysis analysis)
         {
             // Logique avancée pour choisir la meilleure direction
@@ -248,7 +283,12 @@ namespace REALIS.TrafficAI
                 if (analysis.CanGoLeft) return BypassDirection.Left;
             }
 
-            if (analysis.CanReverse) return BypassDirection.Reverse;
+            if (analysis.IsInTrafficJam && analysis.CanReverse)
+                return BypassDirection.Reverse;
+
+            if (analysis.CanReverse)
+                return BypassDirection.Reverse;
+
             return BypassDirection.None;
         }
 
@@ -283,12 +323,19 @@ namespace REALIS.TrafficAI
             try
             {
                 Vector3 targetPosition = CalculateBypassTarget(veh, analysis);
-                
+
                 if (targetPosition == Vector3.Zero) return false;
 
+                // Vérifie qu'il n'y a pas d'obstacle majeur vers la cible
+                if (IsPathBlocked(veh, (targetPosition - veh.Position).Normalized,
+                                  targetPosition.DistanceTo(veh.Position)))
+                    return false;
+
                 // Utilise une approche plus douce avec plusieurs flags
-                var drivingFlags = VehicleDrivingFlags.StopForVehicles | 
-                                 VehicleDrivingFlags.SwerveAroundAllVehicles;
+                var drivingFlags = VehicleDrivingFlags.StopForVehicles |
+                                 VehicleDrivingFlags.SwerveAroundAllVehicles |
+                                 VehicleDrivingFlags.SteerAroundObjects |
+                                 VehicleDrivingFlags.SteerAroundPeds;
 
                 // Vitesse adaptée à la manœuvre
                 float speed = analysis.PreferredDirection == BypassDirection.Reverse ? 3f : 6f;
@@ -305,8 +352,8 @@ namespace REALIS.TrafficAI
         private Vector3 CalculateBypassTarget(Vehicle veh, BlockageAnalysis analysis)
         {
             Vector3 baseTarget = Vector3.Zero;
-            float lateralDistance = 5f;
-            float forwardDistance = 12f;
+            float lateralDistance = analysis.IsInTrafficJam ? 7f : 5f;
+            float forwardDistance = analysis.IsInTrafficJam ? 15f : 12f;
 
             switch (analysis.PreferredDirection)
             {
@@ -332,6 +379,15 @@ namespace REALIS.TrafficAI
             info.BlockedTime = 0f;
             info.Honked = false;
             // Ne reset pas BypassAttempts immédiatement pour éviter les boucles
+
+            // Retire l'entrée de suivi si le véhicule roule de nouveau
+            Vehicle veh = info.Vehicle;
+            if (veh != null && veh.Exists() && veh.Speed > SpeedThreshold)
+            {
+                _tracked.Remove(veh.Handle);
+                _lastActionTime.Remove(veh.Handle);
+                _processingVehicles.Remove(veh.Handle);
+            }
         }
 
         private void CleanupInvalidEntries()
@@ -354,6 +410,27 @@ namespace REALIS.TrafficAI
                 _processingVehicles.Remove(key);
             }
         }
+
+        private void CleanupStaleEntries()
+        {
+            var now = DateTime.Now;
+            var toRemove = new List<int>();
+
+            foreach (var kvp in _tracked)
+            {
+                if ((now - kvp.Value.LastSeen).TotalSeconds > TrackingTimeout)
+                {
+                    toRemove.Add(kvp.Key);
+                }
+            }
+
+            foreach (var key in toRemove)
+            {
+                _tracked.Remove(key);
+                _lastActionTime.Remove(key);
+                _processingVehicles.Remove(key);
+            }
+        }
     }
 
     // Classes auxiliaires pour une meilleure organisation
@@ -362,6 +439,7 @@ namespace REALIS.TrafficAI
         public bool IsBlocked { get; set; }
         public bool IsPlayerBlocking { get; set; }
         public float DistanceToObstacle { get; set; }
+        public bool IsInTrafficJam { get; set; }
         public bool CanGoLeft { get; set; }
         public bool CanGoRight { get; set; }
         public bool CanReverse { get; set; }

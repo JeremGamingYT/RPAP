@@ -10,6 +10,13 @@
 ### ➕ Améliorations
 - Les PNJ fuient également lorsqu'ils entendent des tirs à proximité.
 
+## Version 1.27.4 - TrafficAI amélioré (2025-06-05)
+
+### 🚗 Navigation et stabilité
+- Contournement plus efficace des obstacles (joueur et PNJ).
+- Nettoyage des véhicules suivis pour éviter l'accumulation en embouteillage.
+- Réduction des risques de crash lorsque plusieurs voies sont bloquées.
+
 ## Version 1.27.1 - NPCIntelligence Build Fix (2025-06-03)
 
 ### 🛠️ Correction de build
