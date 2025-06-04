@@ -7,4 +7,5 @@ Ce dépôt contient divers scripts pour GTA V.
 
 * Le suivi automatique du passager dans `UrbanLife` est désactivé pour eviter un crash en conduisant.
 * L'intégration `NPCRoadRage` est maintenant désactivée afin d'éviter les plantages quand on croise d'autres véhicules.
+* TrafficAI gère mieux les obstacles et évite les crashs liés aux embouteillages massifs.
 * L'intégration `NPCRoadRage` est maintenant désactivée afin d'éviter les plantages quand on croise d'autres véhicules.
