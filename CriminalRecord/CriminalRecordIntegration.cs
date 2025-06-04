@@ -4,6 +4,7 @@ using GTA.Math;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using REALIS.Common;
 
 /// <summary>
 /// Intégration du système de casier judiciaire avec les autres mods existants
@@ -213,7 +214,7 @@ public class CriminalRecordIntegration : Script
         // Vérifier si le joueur fuit la police
         if (Game.Player.Wanted.WantedLevel > 0 && player.IsInVehicle() && player.CurrentVehicle.Speed > 15f)
         {
-            Vehicle[] policeVehicles = World.GetNearbyVehicles(player, 100f)
+            Vehicle[] policeVehicles = VehicleQueryService.GetNearbyVehicles(player.Position, 100f)
                 .Where(v => IsPoliceVehicle(v)).ToArray();
                 
             if (policeVehicles.Length > 0)

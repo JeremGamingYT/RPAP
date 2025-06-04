@@ -2,6 +2,7 @@ using GTA;
 using GTA.Native;
 using GTA.Math;
 using System;
+using REALIS.Common;
 
 namespace REALIS.UrbanLife
 {
@@ -48,7 +49,11 @@ namespace REALIS.UrbanLife
         {
             if (ped.IsInVehicle())
             {
-                ped.Task.DriveTo(ped.CurrentVehicle, targetPosition, 5.0f, VehicleDrivingFlags.StopForVehicles, 25.0f);
+                if (VehicleQueryService.TryAcquireControl(ped.CurrentVehicle))
+                {
+                    ped.Task.DriveTo(ped.CurrentVehicle, targetPosition, 5.0f, VehicleDrivingFlags.StopForVehicles, 25.0f);
+                    VehicleQueryService.ReleaseControl(ped.CurrentVehicle);
+                }
             }
             else
             {
@@ -69,7 +74,11 @@ namespace REALIS.UrbanLife
                 // Réessayer le déplacement
                 if (ped.IsInVehicle())
                 {
-                    ped.Task.DriveTo(ped.CurrentVehicle, targetPosition, 5.0f, VehicleDrivingFlags.StopForVehicles, 25.0f);
+                    if (VehicleQueryService.TryAcquireControl(ped.CurrentVehicle))
+                    {
+                        ped.Task.DriveTo(ped.CurrentVehicle, targetPosition, 5.0f, VehicleDrivingFlags.StopForVehicles, 25.0f);
+                        VehicleQueryService.ReleaseControl(ped.CurrentVehicle);
+                    }
                 }
                 else
                 {
@@ -283,7 +292,11 @@ namespace REALIS.UrbanLife
         {
             if (targetVehicle?.Exists() == true)
             {
-                ped.Task.EnterVehicle(targetVehicle, seat);
+                if (VehicleQueryService.TryAcquireControl(targetVehicle))
+                {
+                    ped.Task.EnterVehicle(targetVehicle, seat);
+                    VehicleQueryService.ReleaseControl(targetVehicle);
+                }
             }
         }
         
@@ -316,7 +329,11 @@ namespace REALIS.UrbanLife
         {
             if (ped.IsInVehicle())
             {
-                ped.Task.DriveTo(ped.CurrentVehicle, destination, 5.0f, VehicleDrivingFlags.StopForVehicles, speed);
+                if (VehicleQueryService.TryAcquireControl(ped.CurrentVehicle))
+                {
+                    ped.Task.DriveTo(ped.CurrentVehicle, destination, 5.0f, VehicleDrivingFlags.StopForVehicles, speed);
+                    VehicleQueryService.ReleaseControl(ped.CurrentVehicle);
+                }
             }
         }
         

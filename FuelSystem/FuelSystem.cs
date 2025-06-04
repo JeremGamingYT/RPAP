@@ -8,6 +8,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 using System.Linq;
+using REALIS.Common;
 using RealHandlingLib;   // ← ajoute cette ligne
 
 public class RealisticFuelSystem : Script
@@ -704,7 +705,7 @@ public class RealisticFuelSystem : Script
                 }
 
                 // Find the nearest vehicle
-                Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerPed.Position, 5.0f);
+                Vehicle[] nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPed.Position, 5.0f);
                 Vehicle? nearestVehicle = null;
                 float minDistance = float.MaxValue;
 
@@ -758,7 +759,7 @@ public class RealisticFuelSystem : Script
                 if (playerPed.CurrentVehicle == null)
                 {
                     // Trouver le véhicule le plus proche
-                    Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerPed.Position, 5.0f);
+                    Vehicle[] nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPed.Position, 5.0f);
                     Vehicle? nearestVehicle = null;
                     float minDistance = float.MaxValue;
                     

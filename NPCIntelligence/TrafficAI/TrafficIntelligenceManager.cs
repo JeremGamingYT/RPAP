@@ -4,6 +4,7 @@ using GTA.Native;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using REALIS.Common;
 
 namespace REALIS.TrafficAI
 {
@@ -53,7 +54,7 @@ namespace REALIS.TrafficAI
                 Vehicle playerVehicle = player.CurrentVehicle;
                 if (playerVehicle.Speed < 0.5f) return; // Le joueur ne bouge pas
 
-                var nearby = World.GetNearbyVehicles(player.Position, CheckRadius);
+                var nearby = VehicleQueryService.GetNearbyVehicles(player.Position, CheckRadius);
                 if (nearby == null || nearby.Length == 0) return;
 
                 // Traite seulement les véhicules les plus pertinents
@@ -115,6 +116,9 @@ namespace REALIS.TrafficAI
         {
             try
             {
+                if (!VehicleQueryService.TryAcquireControl(veh))
+                    return;
+
                 _processingVehicles.Add(veh.Handle);
 
                 if (!_tracked.TryGetValue(veh.Handle, out var info))
@@ -136,6 +140,7 @@ namespace REALIS.TrafficAI
             finally
             {
                 _processingVehicles.Remove(veh.Handle);
+                VehicleQueryService.ReleaseControl(veh);
             }
         }
 
@@ -245,7 +250,7 @@ namespace REALIS.TrafficAI
         {
             try
             {
-                var nearby = World.GetNearbyVehicles(veh.Position, 12f);
+                var nearby = VehicleQueryService.GetNearbyVehicles(veh.Position, 12f);
                 if (nearby == null) return 0;
 
                 int count = 0;
