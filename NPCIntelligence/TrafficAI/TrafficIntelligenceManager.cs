@@ -8,262 +8,292 @@ using System.Linq;
 namespace REALIS.TrafficAI
 {
     /// <summary>
-    /// Gestionnaire de comportements pour les PNJ bloqués dans la circulation.
-    /// Les véhicules klaxonnent lorsqu'ils sont coincés et tentent de contourner
-    /// l'obstacle après quelques secondes.
+    /// Gestionnaire avancé de comportements pour les PNJ bloqués dans la circulation.
+    /// Système intelligent avec détection multi-directionnelle, limitation des ressources,
+    /// et algorithmes de contournement adaptatifs.
     /// </summary>
     public class TrafficIntelligenceManager : Script
     {
         private readonly Dictionary<int, BlockedVehicleInfo> _tracked = new();
-
-        // Rayon de détection autour du joueur
-        private const float CheckRadius = 80f;
-        private const float SpeedThreshold = 0.8f; // vitesse minimale pour considérer le véhicule arrêté
-        private const float HonkDelay = 2f;        // temps avant klaxon
-        private const float BypassDelay = 4f;      // temps avant tentative de dépassement
-        private const int MaxBypassAttempts = 3;   // nombre max de tentatives de dépassement
-        private const float CourtesyDistance = 15f; // distance pour la courtoisie
+        private readonly HashSet<int> _processingVehicles = new(); // Prévient les doubles traitements
+        private readonly Dictionary<int, DateTime> _lastActionTime = new(); // Cooldown par véhicule
+        
+        // Configuration avancée
+        private const float CheckRadius = 40f;
+        private const float SpeedThreshold = 0.8f; 
+        private const float HonkDelay = 3f;       
+        private const float BypassDelay = 6f;     
+        private const int MaxBypassAttempts = 2;  
+        private const int MaxSimultaneousProcessing = 8; // Limite pour éviter les surcharges
+        private const float MinCooldownSeconds = 5f; // Cooldown minimum entre actions
+        private const float PlayerSafeZone = 8f; // Zone de sécurité autour du joueur
+        
+        // Compteurs pour debug et optimisation
+        private int _processedThisTick = 0;
+        private DateTime _lastCleanup = DateTime.Now;
 
         public TrafficIntelligenceManager()
         {
             Tick += OnTick;
-            Interval = 800; // Exécuter environ 1.25 fois par seconde
+            Interval = 1500; // Un peu plus rapide pour plus de réactivité
         }
 
         private void OnTick(object sender, EventArgs e)
         {
             try
             {
+                _processedThisTick = 0;
+                
                 Ped player = Game.Player.Character;
-                if (player == null || !player.Exists()) return;
+                if (player?.CurrentVehicle == null || !player.Exists()) return;
+
+                Vehicle playerVehicle = player.CurrentVehicle;
+                if (playerVehicle.Speed < 0.5f) return; // Le joueur ne bouge pas
 
                 var nearby = World.GetNearbyVehicles(player.Position, CheckRadius);
-                if (nearby == null) return;
+                if (nearby == null || nearby.Length == 0) return;
 
-                foreach (var veh in nearby)
+                // Traite seulement les véhicules les plus pertinents
+                var relevantVehicles = nearby
+                    .Where(IsVehicleRelevant)
+                    .OrderBy(v => v.Position.DistanceTo(player.Position))
+                    .Take(MaxSimultaneousProcessing)
+                    .ToList();
+
+                foreach (var veh in relevantVehicles)
                 {
-                    if (veh == null || !veh.Exists() || veh.Driver == null) continue;
-                    if (veh.Driver == player || !veh.Driver.IsAlive) continue;
-
-                    if (!_tracked.TryGetValue(veh.Handle, out var info))
-                    {
-                        info = new BlockedVehicleInfo(veh.Driver, veh);
-                        _tracked[veh.Handle] = info;
-                    }
-
-                    UpdateVehicle(info);
+                    if (_processedThisTick >= MaxSimultaneousProcessing) break;
+                    
+                    ProcessVehicle(veh, playerVehicle);
+                    _processedThisTick++;
                 }
 
-                // Gestion de la courtoisie pour les voies libres
-                HandleTrafficCourtesy(nearby);
-
-                // nettoyage des entrées invalides
-                var invalid = _tracked.Where(p => p.Value?.Vehicle == null || !p.Value.Vehicle.Exists() || p.Value.Vehicle.Driver == null).Select(p => p.Key).ToList();
-                foreach (var key in invalid)
-                    _tracked.Remove(key);
+                // Nettoyage périodique plus efficace
+                if ((DateTime.Now - _lastCleanup).TotalSeconds > 10)
+                {
+                    CleanupInvalidEntries();
+                    _lastCleanup = DateTime.Now;
+                }
             }
-            catch
+            catch (Exception)
             {
-                // Log l'erreur silencieusement pour éviter le crash
+                // Log l'erreur mais continue à fonctionner
+                // Dans un mod de production, on loggerait dans un fichier
             }
         }
 
-        private void UpdateVehicle(BlockedVehicleInfo info)
+        private bool IsVehicleRelevant(Vehicle veh)
+        {
+            if (veh == null || !veh.Exists() || veh.Driver == null || !veh.Driver.IsAlive) 
+                return false;
+
+            // Ignore le véhicule du joueur
+            if (veh.Driver == Game.Player.Character) 
+                return false;
+
+            // Ignore les véhicules trop proches (zone de sécurité)
+            float distance = veh.Position.DistanceTo(Game.Player.Character.Position);
+            if (distance < PlayerSafeZone || distance > CheckRadius) 
+                return false;
+
+            // Ignore les véhicules en mouvement rapide
+            if (veh.Speed > SpeedThreshold * 3) 
+                return false;
+
+            // Ignore les véhicules déjà en traitement
+            if (_processingVehicles.Contains(veh.Handle)) 
+                return false;
+
+            return true;
+        }
+
+        private void ProcessVehicle(Vehicle veh, Vehicle playerVehicle)
         {
             try
             {
-                Vehicle veh = info.Vehicle;
-                Ped driver = info.Driver;
+                _processingVehicles.Add(veh.Handle);
 
-                if (veh == null || !veh.Exists() || driver == null || !driver.Exists()) return;
-
-                if (veh.Speed > SpeedThreshold)
+                if (!_tracked.TryGetValue(veh.Handle, out var info))
                 {
-                    info.BlockedTime = 0f;
-                    info.Honked = false;
-                    info.BypassAttempts = 0;
+                    info = new BlockedVehicleInfo(veh.Driver, veh);
+                    _tracked[veh.Handle] = info;
+                }
+
+                UpdateVehicleIntelligently(info, playerVehicle);
+            }
+            catch
+            {
+                // Supprime de la liste en cas d'erreur
+                _processingVehicles.Remove(veh.Handle);
+                _tracked.Remove(veh.Handle);
+            }
+            finally
+            {
+                _processingVehicles.Remove(veh.Handle);
+            }
+        }
+
+        private void UpdateVehicleIntelligently(BlockedVehicleInfo info, Vehicle playerVehicle)
+        {
+            Vehicle veh = info.Vehicle;
+            Ped driver = info.Driver;
+
+            if (veh == null || !veh.Exists() || driver == null || !driver.Exists()) return;
+
+            // Respect du cooldown
+            if (_lastActionTime.TryGetValue(veh.Handle, out var lastAction))
+            {
+                if ((DateTime.Now - lastAction).TotalSeconds < MinCooldownSeconds)
                     return;
-                }
+            }
 
-                if (!IsBlocked(veh))
+            // Reset si le véhicule bouge
+            if (veh.Speed > SpeedThreshold)
+            {
+                ResetVehicleState(info);
+                return;
+            }
+
+            // Détection avancée de blocage
+            var blockageInfo = AnalyzeBlockage(veh, playerVehicle);
+            if (!blockageInfo.IsBlocked)
+            {
+                ResetVehicleState(info);
+                return;
+            }
+
+            info.BlockedTime += 1.5f;
+
+            // Klaxon intelligent basé sur la distance et la situation
+            if (ShouldHonk(info, blockageInfo))
+            {
+                PerformIntelligentHonk(veh, blockageInfo);
+                info.Honked = true;
+                _lastActionTime[veh.Handle] = DateTime.Now;
+            }
+
+            // Contournement adaptatif
+            if (ShouldAttemptBypass(info, blockageInfo))
+            {
+                if (PerformIntelligentBypass(driver, veh, blockageInfo))
                 {
+                    info.BypassAttempts++;
                     info.BlockedTime = 0f;
-                    info.Honked = false;
-                    info.BypassAttempts = 0;
-                    return;
-                }
-
-                info.BlockedTime += 0.8f; // Incrémente selon l'intervalle
-
-                // Klaxon plus rapide et réaliste
-                if (info.BlockedTime > HonkDelay && !info.Honked)
-                {
-                    try
-                    {
-                        // Klaxon plus court et réaliste
-                        Function.Call(Hash.START_VEHICLE_HORN, veh, 800, 0, false);
-                        info.Honked = true;
-                    }
-                    catch { /* Ignore si le klaxon échoue */ }
-                }
-
-                // Tentatives de contournement plus intelligentes
-                if (info.BlockedTime > BypassDelay && info.BypassAttempts < MaxBypassAttempts)
-                {
-                    if (AttemptIntelligentBypass(driver, veh))
-                    {
-                        info.BypassAttempts++;
-                        info.BlockedTime = 0f;
-                        info.Honked = false;
-                    }
-                    else
-                    {
-                        // Si pas possible de contourner, recommence le cycle mais plus lentement
-                        info.BlockedTime = BypassDelay - 1f;
-                    }
+                    _lastActionTime[veh.Handle] = DateTime.Now;
                 }
             }
-            catch { /* Ignore les erreurs pour éviter le crash */ }
         }
 
-        private bool IsBlocked(Vehicle veh)
+        private BlockageAnalysis AnalyzeBlockage(Vehicle veh, Vehicle playerVehicle)
+        {
+            var analysis = new BlockageAnalysis();
+            
+            // Vérifie si c'est spécifiquement le joueur qui bloque
+            float distanceToPlayer = veh.Position.DistanceTo(playerVehicle.Position);
+            Vector3 directionToPlayer = (playerVehicle.Position - veh.Position).Normalized;
+            float angleToPlayer = Vector3.Dot(veh.ForwardVector, directionToPlayer);
+
+            analysis.IsPlayerBlocking = distanceToPlayer < 15f && angleToPlayer > 0.3f;
+            analysis.DistanceToObstacle = distanceToPlayer;
+
+            // Raycast multi-directionnel pour détecter les obstacles
+            analysis.IsBlocked = IsPathBlocked(veh, veh.ForwardVector, 12f);
+            
+            if (analysis.IsBlocked)
+            {
+                // Analyse des directions possibles
+                analysis.CanGoLeft = !IsPathBlocked(veh, -veh.RightVector, 8f);
+                analysis.CanGoRight = !IsPathBlocked(veh, veh.RightVector, 8f);
+                analysis.CanReverse = !IsPathBlocked(veh, -veh.ForwardVector, 6f);
+                
+                // Préfère la direction la plus sûre
+                analysis.PreferredDirection = DetermineOptimalDirection(veh, analysis);
+            }
+
+            return analysis;
+        }
+
+        private bool IsPathBlocked(Vehicle veh, Vector3 direction, float distance)
         {
             try
             {
-                if (veh == null || !veh.Exists()) return false;
+                Vector3 start = veh.Position + Vector3.WorldUp * 1.5f;
+                Vector3 end = start + direction * distance;
                 
-                Vector3 start = veh.Position + veh.ForwardVector * 1.5f + Vector3.WorldUp;
-                Vector3 end = start + veh.ForwardVector * 6f;
-                var hit = World.Raycast(start, end, IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds, veh);
-                return hit.DidHit && hit.HitEntity != null && hit.HitEntity.Handle != veh.Handle;
+                var hit = World.Raycast(start, end, 
+                    IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds, 
+                    veh);
+                
+                return hit.DidHit;
             }
             catch
             {
-                return false;
+                return true; // Assume bloqué en cas d'erreur
             }
         }
 
-        private bool AttemptIntelligentBypass(Ped driver, Vehicle veh)
+        private BypassDirection DetermineOptimalDirection(Vehicle veh, BlockageAnalysis analysis)
+        {
+            // Logique avancée pour choisir la meilleure direction
+            if (analysis.IsPlayerBlocking)
+            {
+                // Si c'est le joueur qui bloque, préfère la gauche (plus naturel)
+                if (analysis.CanGoLeft) return BypassDirection.Left;
+                if (analysis.CanGoRight) return BypassDirection.Right;
+            }
+            else
+            {
+                // Pour les autres obstacles, préfère la droite
+                if (analysis.CanGoRight) return BypassDirection.Right;
+                if (analysis.CanGoLeft) return BypassDirection.Left;
+            }
+
+            if (analysis.CanReverse) return BypassDirection.Reverse;
+            return BypassDirection.None;
+        }
+
+        private bool ShouldHonk(BlockedVehicleInfo info, BlockageAnalysis analysis)
+        {
+            return info.BlockedTime > HonkDelay && 
+                   !info.Honked && 
+                   analysis.IsPlayerBlocking &&
+                   analysis.DistanceToObstacle < 12f;
+        }
+
+        private void PerformIntelligentHonk(Vehicle veh, BlockageAnalysis analysis)
         {
             try
             {
-                if (driver == null || !driver.Exists() || veh == null || !veh.Exists()) return false;
-
-                // Distances adaptées au type de véhicule
-                float forwardOffset = GetForwardOffset(veh);
-                float sideOffset = GetSideOffset(veh);
-
-                Vector3 vehiclePos = veh.Position;
-                Vector3 forward = vehiclePos + veh.ForwardVector * forwardOffset;
-                
-                // Test des directions possibles (droite prioritaire, puis gauche)
-                Vector3 rightTarget = forward + veh.RightVector * sideOffset;
-                Vector3 leftTarget = forward - veh.RightVector * sideOffset;
-                
-                Vector3? bestTarget = null;
-                
-                // Priorité à droite (comme en conduite réelle)
-                if (IsRouteClearAndSafe(vehiclePos, rightTarget, veh))
-                {
-                    bestTarget = rightTarget;
-                }
-                else if (IsRouteClearAndSafe(vehiclePos, leftTarget, veh))
-                {
-                    bestTarget = leftTarget;
-                }
-
-                if (bestTarget.HasValue)
-                {
-                    // Signale le changement de voie aux autres véhicules
-                    SignalLaneChange(veh, bestTarget.Value);
-                    
-                    // Assigne la tâche de contournement
-                    Function.Call(Hash.CLEAR_PED_TASKS, driver);
-                    Wait(50);
-                    
-                    // Utilise une vitesse adaptée à la situation
-                    float speed = Math.Max(5f, Math.Min(15f, veh.Speed + 3f));
-                    
-                    Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD, driver, veh,
-                        bestTarget.Value.X, bestTarget.Value.Y, bestTarget.Value.Z, 
-                        speed, 0, Function.Call<int>(Hash.GET_ENTITY_MODEL, veh), 
-                        787004, 3f, 0);
-                        
-                    return true;
-                }
-
-                return false;
+                // Durée du klaxon basée sur la distance et l'urgence
+                int duration = analysis.IsPlayerBlocking ? 800 : 400;
+                Function.Call(Hash.START_VEHICLE_HORN, veh, duration, 0, false);
             }
-            catch
-            {
-                return false;
-            }
+            catch { /* Ignore */ }
         }
 
-        private float GetForwardOffset(Vehicle veh)
+        private bool ShouldAttemptBypass(BlockedVehicleInfo info, BlockageAnalysis analysis)
         {
-            // Adapte la distance selon la taille du véhicule
-            float baseOffset = 8f;
-            if (veh.Model.IsBus) return baseOffset + 2f;
-            if (IsLargeVehicle(veh)) return baseOffset + 1.5f;
-            if (veh.Model.IsBike) return baseOffset - 2f;
-            return baseOffset;
+            return info.BlockedTime > BypassDelay && 
+                   info.BypassAttempts < MaxBypassAttempts &&
+                   analysis.PreferredDirection != BypassDirection.None;
         }
 
-        private float GetSideOffset(Vehicle veh)
-        {
-            // Adapte la distance latérale selon le véhicule
-            float baseOffset = 3.5f;
-            if (veh.Model.IsBus) return baseOffset + 1f;
-            if (IsLargeVehicle(veh)) return baseOffset + 0.5f;
-            if (veh.Model.IsBike) return baseOffset - 1f;
-            return baseOffset;
-        }
-
-        private bool IsLargeVehicle(Vehicle veh)
+        private bool PerformIntelligentBypass(Ped driver, Vehicle veh, BlockageAnalysis analysis)
         {
             try
             {
-                if (veh == null || !veh.Exists()) return false;
+                Vector3 targetPosition = CalculateBypassTarget(veh, analysis);
                 
-                // Vérifie par classe de véhicule
-                var vehicleClass = Function.Call<int>(Hash.GET_VEHICLE_CLASS, veh);
-                
-                // Classes pour véhicules lourds : Commercial (11), Industrial (12), Service (17), Emergency (18)
-                return vehicleClass == 11 || vehicleClass == 12 || vehicleClass == 17 || vehicleClass == 18;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+                if (targetPosition == Vector3.Zero) return false;
 
-        private bool IsRouteClearAndSafe(Vector3 start, Vector3 end, Vehicle ignore)
-        {
-            try
-            {
-                // Test de collision basique
-                var test = ShapeTest.StartTestCapsule(
-                    start + Vector3.WorldUp,
-                    end + Vector3.WorldUp,
-                    2f,
-                    IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles,
-                    ignore);
-                var result = test.GetResult();
-                
-                if (result.result.DidHit) return false;
+                // Utilise une approche plus douce avec plusieurs flags
+                var drivingFlags = VehicleDrivingFlags.StopForVehicles | 
+                                 VehicleDrivingFlags.SwerveAroundAllVehicles;
 
-                // Vérification de sécurité : pas trop près d'autres véhicules
-                var nearbyVehicles = World.GetNearbyVehicles(end, 8f);
-                if (nearbyVehicles != null)
-                {
-                    foreach (var other in nearbyVehicles)
-                    {
-                        if (other == ignore || other == null || !other.Exists()) continue;
-                        if (other.Position.DistanceTo(end) < 4f) return false;
-                    }
-                }
+                // Vitesse adaptée à la manœuvre
+                float speed = analysis.PreferredDirection == BypassDirection.Reverse ? 3f : 6f;
 
+                driver.Task.DriveTo(veh, targetPosition, 3f, drivingFlags, speed);
                 return true;
             }
             catch
@@ -272,90 +302,77 @@ namespace REALIS.TrafficAI
             }
         }
 
-        private void SignalLaneChange(Vehicle changingVehicle, Vector3 targetPosition)
+        private Vector3 CalculateBypassTarget(Vehicle veh, BlockageAnalysis analysis)
         {
-            try
+            Vector3 baseTarget = Vector3.Zero;
+            float lateralDistance = 5f;
+            float forwardDistance = 12f;
+
+            switch (analysis.PreferredDirection)
             {
-                // Active les clignotants
-                if (targetPosition.X > changingVehicle.Position.X)
-                {
-                    Function.Call(Hash.SET_VEHICLE_INDICATOR_LIGHTS, changingVehicle, 1, true); // Droite
-                }
-                else
-                {
-                    Function.Call(Hash.SET_VEHICLE_INDICATOR_LIGHTS, changingVehicle, 0, true); // Gauche
-                }
+                case BypassDirection.Left:
+                    baseTarget = veh.Position + (-veh.RightVector * lateralDistance) + (veh.ForwardVector * forwardDistance);
+                    break;
+                case BypassDirection.Right:
+                    baseTarget = veh.Position + (veh.RightVector * lateralDistance) + (veh.ForwardVector * forwardDistance);
+                    break;
+                case BypassDirection.Reverse:
+                    baseTarget = veh.Position + (-veh.ForwardVector * 8f);
+                    break;
+                default:
+                    return Vector3.Zero;
             }
-            catch { }
+
+            // Ajuste la hauteur pour qu'elle soit sur la route (utilise la hauteur du véhicule actuel)
+            return new Vector3(baseTarget.X, baseTarget.Y, veh.Position.Z);
         }
 
-        private void HandleTrafficCourtesy(Vehicle[] nearbyVehicles)
+        private void ResetVehicleState(BlockedVehicleInfo info)
         {
-            try
-            {
-                if (nearbyVehicles == null) return;
-
-                foreach (var veh in nearbyVehicles)
-                {
-                    if (veh?.Driver == null || !veh.Exists()) continue;
-                    
-                    // Vérifie s'il y a des véhicules bloqués à proximité qui ont besoin de passer
-                    var blockedNearby = FindBlockedVehiclesNeedingSpace(veh, nearbyVehicles);
-                    
-                    if (blockedNearby.Any() && veh.Speed > 0.5f)
-                    {
-                        // Ce véhicule peut laisser passer les autres
-                        OfferCourtesy(veh, blockedNearby);
-                    }
-                }
-            }
-            catch { }
+            info.BlockedTime = 0f;
+            info.Honked = false;
+            // Ne reset pas BypassAttempts immédiatement pour éviter les boucles
         }
 
-        private List<Vehicle> FindBlockedVehiclesNeedingSpace(Vehicle checkingVehicle, Vehicle[] allVehicles)
+        private void CleanupInvalidEntries()
         {
-            var needingSpace = new List<Vehicle>();
+            var toRemove = new List<int>();
             
-            try
+            foreach (var kvp in _tracked)
             {
-                foreach (var other in allVehicles)
+                if (kvp.Value?.Vehicle == null || !kvp.Value.Vehicle.Exists() || 
+                    kvp.Value.Vehicle.Driver == null || !kvp.Value.Vehicle.Driver.Exists())
                 {
-                    if (other == checkingVehicle || other?.Driver == null) continue;
-                    
-                    float distance = other.Position.DistanceTo(checkingVehicle.Position);
-                    if (distance > CourtesyDistance) continue;
-                    
-                    // Vérifie si l'autre véhicule est bloqué et a essayé de changer de voie
-                    if (_tracked.TryGetValue(other.Handle, out var info))
-                    {
-                        if (info.BlockedTime > 2f && info.BypassAttempts > 0)
-                        {
-                            needingSpace.Add(other);
-                        }
-                    }
+                    toRemove.Add(kvp.Key);
                 }
             }
-            catch { }
-            
-            return needingSpace;
-        }
 
-        private void OfferCourtesy(Vehicle courteous, List<Vehicle> needingSpace)
-        {
-            try
+            foreach (var key in toRemove)
             {
-                if (!needingSpace.Any()) return;
-                
-                var driver = courteous.Driver;
-                if (driver == null || !driver.Exists()) return;
-                
-                // Ralentit temporairement pour laisser passer
-                Function.Call(Hash.TASK_VEHICLE_TEMP_ACTION, driver, courteous, 6, 2000); // Ralentir
-                
-                // Petite pause pour que l'autre puisse passer
-                Wait(100);
+                _tracked.Remove(key);
+                _lastActionTime.Remove(key);
+                _processingVehicles.Remove(key);
             }
-            catch { }
         }
+    }
+
+    // Classes auxiliaires pour une meilleure organisation
+    public class BlockageAnalysis
+    {
+        public bool IsBlocked { get; set; }
+        public bool IsPlayerBlocking { get; set; }
+        public float DistanceToObstacle { get; set; }
+        public bool CanGoLeft { get; set; }
+        public bool CanGoRight { get; set; }
+        public bool CanReverse { get; set; }
+        public BypassDirection PreferredDirection { get; set; }
+    }
+
+    public enum BypassDirection
+    {
+        None,
+        Left,
+        Right,
+        Reverse
     }
 }
