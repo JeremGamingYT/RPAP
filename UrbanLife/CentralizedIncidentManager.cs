@@ -717,6 +717,7 @@ namespace REALIS.UrbanLife
         {
             try
             {
+                Logger.Error(message);
                 Notification.PostTicker($"~r~[Incident] {message}", false);
             }
             catch

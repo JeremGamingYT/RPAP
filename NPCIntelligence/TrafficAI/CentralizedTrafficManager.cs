@@ -524,6 +524,7 @@ namespace REALIS.TrafficAI
         {
             try
             {
+                Logger.Error(message);
                 GTA.UI.Notification.PostTicker($"~o~[Traffic] {message}", false);
             }
             catch
