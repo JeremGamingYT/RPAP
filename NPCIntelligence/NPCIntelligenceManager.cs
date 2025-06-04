@@ -28,6 +28,8 @@ namespace REALIS.NPCIntelligence
             if (player == null || !player.Exists() || player.IsDead)
                 return;
 
+            bool playerShooting = Function.Call<bool>(Hash.IS_PED_SHOOTING, player);
+
             foreach (Ped ped in World.GetNearbyPeds(player, CheckRadius))
             {
                 if (ped == null || !ped.Exists() || ped.IsDead || ped == player)
@@ -39,12 +41,19 @@ namespace REALIS.NPCIntelligence
                     _statuses[ped.Handle] = info;
                 }
 
+                UpdatePed(ped, player, info, playerShooting);
                 UpdatePed(ped, player, info);
             }
 
             CleanupStatuses();
         }
 
+        private void UpdatePed(Ped ped, Ped player, NPCStatusInfo info, bool playerShooting)
+        {
+            bool beingAimedAt = Function.Call<bool>(Hash.IS_PLAYER_FREE_AIMING_AT_ENTITY, Game.Player, ped);
+            bool closeThreat = player.Position.DistanceTo(ped.Position) < ThreatRadius;
+
+            if ((beingAimedAt && closeThreat) || (playerShooting && closeThreat) || ped.HasBeenDamagedBy(player))
         private void UpdatePed(Ped ped, Ped player, NPCStatusInfo info)
         {
             bool beingAimedAt = Function.Call<bool>(Hash.IS_PLAYER_FREE_AIMING_AT_ENTITY, Game.Player, ped);

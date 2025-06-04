@@ -5,6 +5,11 @@
 ### ✅ Compilation
 - Suppression de la variable inutile `playerShooting` qui provoquait une erreur de compilation
 
+## Version 1.27.3 - NPCIntelligence réagit aux coups de feu (2025-06-04)
+
+### ➕ Améliorations
+- Les PNJ fuient également lorsqu'ils entendent des tirs à proximité.
+
 ## Version 1.27.1 - NPCIntelligence Build Fix (2025-06-03)
 
 ### 🛠️ Correction de build
