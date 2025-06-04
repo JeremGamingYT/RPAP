@@ -4,6 +4,7 @@ using GTA.Math;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using REALIS.Common;
 
 namespace REALIS.UrbanLife
 {
@@ -116,7 +117,7 @@ namespace REALIS.UrbanLife
         {
             // Utiliser la méthode native pour détecter les explosions récentes
             // Ceci est une approximation car il n'y a pas d'API directe
-            var nearbyVehicles = World.GetNearbyVehicles(playerPos, 200.0f);
+            var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPos, 200.0f);
             foreach (var vehicle in nearbyVehicles)
             {
                 if (vehicle.IsOnFire || vehicle.IsDead)
@@ -145,7 +146,7 @@ namespace REALIS.UrbanLife
             }
             
             // Réduire drastiquement la simulation de klaxons des autres véhicules
-            var nearbyVehicles = World.GetNearbyVehicles(playerPos, 50.0f);
+            var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPos, 50.0f);
             foreach (var vehicle in nearbyVehicles)
             {
                 if (vehicle.Driver != null && vehicle.Driver != Game.Player.Character)
@@ -161,7 +162,7 @@ namespace REALIS.UrbanLife
         
         private void DetectCarCrashes(Vector3 playerPos)
         {
-            var nearbyVehicles = World.GetNearbyVehicles(playerPos, 100.0f);
+            var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPos, 100.0f);
             foreach (var vehicle in nearbyVehicles)
             {
                 if (vehicle.HasCollided && vehicle.Speed > 10.0f)
@@ -174,7 +175,7 @@ namespace REALIS.UrbanLife
         
         private void DetectSirens(Vector3 playerPos)
         {
-            var nearbyVehicles = World.GetNearbyVehicles(playerPos, 200.0f);
+            var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(playerPos, 200.0f);
             foreach (var vehicle in nearbyVehicles)
             {
                 // Vérifier si c'est un véhicule d'urgence avec sirène
