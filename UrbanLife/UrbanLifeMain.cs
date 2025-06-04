@@ -146,11 +146,6 @@ namespace REALIS.UrbanLife
                     blipManager.ClearAllBlips();
                     GTA.UI.Notification.PostTicker("~g~Tous les blips d'événements ont été effacés!", false);
                 }
-                else if (e.KeyCode == System.Windows.Forms.Keys.R)
-                {
-                    // SUPPRIMÉ - causait des conflits
-                    GTA.UI.Notification.PostTicker("~r~Touche R désactivée pour éviter les conflits", false);
-                }
                 else if (e.KeyCode == System.Windows.Forms.Keys.F7)
                 {
                     // CORRECTION F7: Protection contre les crashes à répétition
@@ -386,8 +381,9 @@ namespace REALIS.UrbanLife
             interventionSystem.Update();
             
             // Vérifier les événements NPCRoadRage
-            NPCRoadRageIntegration.CheckForRoadRageEvents();
-            NPCRoadRageIntegration.DetectCollisionEvents();
+            // Désactivé car la détection peut provoquer un crash
+            //NPCRoadRageIntegration.CheckForRoadRageEvents();
+            //NPCRoadRageIntegration.DetectCollisionEvents();
             
             // Vérifier les événements spéciaux (garder pour compatibilité mais réduire la fréquence)
             CheckForSpecialEvents();
