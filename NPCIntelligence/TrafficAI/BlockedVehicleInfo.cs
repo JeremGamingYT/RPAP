@@ -12,6 +12,7 @@ namespace REALIS.TrafficAI
         public Vehicle Vehicle { get; }
         public float BlockedTime { get; set; }
         public bool Honked { get; set; }
+        public int BypassAttempts { get; set; }
 
         public BlockedVehicleInfo(Ped driver, Vehicle vehicle)
         {
@@ -19,6 +20,7 @@ namespace REALIS.TrafficAI
             Vehicle = vehicle;
             BlockedTime = 0f;
             Honked = false;
+            BypassAttempts = 0;
         }
     }
 }

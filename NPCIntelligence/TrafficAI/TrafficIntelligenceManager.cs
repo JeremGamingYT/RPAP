@@ -17,15 +17,17 @@ namespace REALIS.TrafficAI
         private readonly Dictionary<int, BlockedVehicleInfo> _tracked = new();
 
         // Rayon de détection autour du joueur
-        private const float CheckRadius = 60f;
-        private const float SpeedThreshold = 0.5f; // vitesse minimale pour considérer le véhicule arrêté
-        private const float HonkDelay = 3f;        // temps avant klaxon
-        private const float BypassDelay = 6f;      // tentative de dépassement plus rapide
+        private const float CheckRadius = 80f;
+        private const float SpeedThreshold = 0.8f; // vitesse minimale pour considérer le véhicule arrêté
+        private const float HonkDelay = 2f;        // temps avant klaxon
+        private const float BypassDelay = 4f;      // temps avant tentative de dépassement
+        private const int MaxBypassAttempts = 3;   // nombre max de tentatives de dépassement
+        private const float CourtesyDistance = 15f; // distance pour la courtoisie
 
         public TrafficIntelligenceManager()
         {
             Tick += OnTick;
-            Interval = 500; // Exécuter seulement 2 fois par seconde au lieu de 60+
+            Interval = 800; // Exécuter environ 1.25 fois par seconde
         }
 
         private void OnTick(object sender, EventArgs e)
@@ -52,6 +54,9 @@ namespace REALIS.TrafficAI
                     UpdateVehicle(info);
                 }
 
+                // Gestion de la courtoisie pour les voies libres
+                HandleTrafficCourtesy(nearby);
+
                 // nettoyage des entrées invalides
                 var invalid = _tracked.Where(p => p.Value?.Vehicle == null || !p.Value.Vehicle.Exists() || p.Value.Vehicle.Driver == null).Select(p => p.Key).ToList();
                 foreach (var key in invalid)
@@ -60,7 +65,6 @@ namespace REALIS.TrafficAI
             catch
             {
                 // Log l'erreur silencieusement pour éviter le crash
-                // Vous pouvez ajouter un système de log ici si nécessaire
             }
         }
 
@@ -77,6 +81,7 @@ namespace REALIS.TrafficAI
                 {
                     info.BlockedTime = 0f;
                     info.Honked = false;
+                    info.BypassAttempts = 0;
                     return;
                 }
 
@@ -84,27 +89,38 @@ namespace REALIS.TrafficAI
                 {
                     info.BlockedTime = 0f;
                     info.Honked = false;
+                    info.BypassAttempts = 0;
                     return;
                 }
 
-                info.BlockedTime += 0.5f; // Incrémente de 0.5 car on exécute 2 fois par seconde
+                info.BlockedTime += 0.8f; // Incrémente selon l'intervalle
 
+                // Klaxon plus rapide et réaliste
                 if (info.BlockedTime > HonkDelay && !info.Honked)
                 {
                     try
                     {
-                        Function.Call(Hash.START_VEHICLE_HORN, veh, 1000, 0, false);
+                        // Klaxon plus court et réaliste
+                        Function.Call(Hash.START_VEHICLE_HORN, veh, 800, 0, false);
                         info.Honked = true;
                     }
                     catch { /* Ignore si le klaxon échoue */ }
                 }
 
-                if (info.BlockedTime > BypassDelay)
+                // Tentatives de contournement plus intelligentes
+                if (info.BlockedTime > BypassDelay && info.BypassAttempts < MaxBypassAttempts)
                 {
-                    YieldNearbyTraffic(veh);
-                    AttemptBypass(driver, veh);
-                    info.BlockedTime = 0f;
-                    info.Honked = false;
+                    if (AttemptIntelligentBypass(driver, veh))
+                    {
+                        info.BypassAttempts++;
+                        info.BlockedTime = 0f;
+                        info.Honked = false;
+                    }
+                    else
+                    {
+                        // Si pas possible de contourner, recommence le cycle mais plus lentement
+                        info.BlockedTime = BypassDelay - 1f;
+                    }
                 }
             }
             catch { /* Ignore les erreurs pour éviter le crash */ }
@@ -116,8 +132,8 @@ namespace REALIS.TrafficAI
             {
                 if (veh == null || !veh.Exists()) return false;
                 
-                Vector3 start = veh.Position + veh.ForwardVector * 2f + Vector3.WorldUp;
-                Vector3 end = start + veh.ForwardVector * 5f;
+                Vector3 start = veh.Position + veh.ForwardVector * 1.5f + Vector3.WorldUp;
+                Vector3 end = start + veh.ForwardVector * 6f;
                 var hit = World.Raycast(start, end, IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds, veh);
                 return hit.DidHit && hit.HitEntity != null && hit.HitEntity.Handle != veh.Handle;
             }
@@ -127,46 +143,56 @@ namespace REALIS.TrafficAI
             }
         }
 
-        private void AttemptBypass(Ped driver, Vehicle veh)
+        private bool AttemptIntelligentBypass(Ped driver, Vehicle veh)
         {
             try
             {
-                if (driver == null || !driver.Exists() || veh == null || !veh.Exists()) return;
+                if (driver == null || !driver.Exists() || veh == null || !veh.Exists()) return false;
 
-                float forwardOffset = 8f;
-                float sideOffset = 4f;
+                // Distances adaptées au type de véhicule
+                float forwardOffset = GetForwardOffset(veh);
+                float sideOffset = GetSideOffset(veh);
 
-                Vector3 forward = veh.Position + veh.ForwardVector * forwardOffset;
+                Vector3 vehiclePos = veh.Position;
+                Vector3 forward = vehiclePos + veh.ForwardVector * forwardOffset;
+                
+                // Test des directions possibles (droite prioritaire, puis gauche)
                 Vector3 rightTarget = forward + veh.RightVector * sideOffset;
                 Vector3 leftTarget = forward - veh.RightVector * sideOffset;
-
-                Vector3? target = null;
-                if (IsRouteClear(veh.Position, rightTarget, veh))
-                    target = rightTarget;
-                else if (IsRouteClear(veh.Position, leftTarget, veh))
-                    target = leftTarget;
-
-                if (target.HasValue)
+                
+                Vector3? bestTarget = null;
+                
+                // Priorité à droite (comme en conduite réelle)
+                if (IsRouteClearAndSafe(vehiclePos, rightTarget, veh))
                 {
-                    Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, driver, veh,
-                        target.Value.X, target.Value.Y, target.Value.Z, 12f, 786603, 7f);
+                    bestTarget = rightTarget;
                 }
-            }
-            catch { /* Ignore les erreurs */ }
-        }
+                else if (IsRouteClearAndSafe(vehiclePos, leftTarget, veh))
+                {
+                    bestTarget = leftTarget;
+                }
 
-        private bool IsRouteClear(Vector3 start, Vector3 end, Vehicle ignore)
-        {
-            try
-            {
-                var test = ShapeTest.StartTestCapsule(
-                    start + Vector3.WorldUp,
-                    end + Vector3.WorldUp,
-                    2f,
-                    IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds,
-                    ignore);
-                var result = test.GetResult();
-                return !result.result.DidHit;
+                if (bestTarget.HasValue)
+                {
+                    // Signale le changement de voie aux autres véhicules
+                    SignalLaneChange(veh, bestTarget.Value);
+                    
+                    // Assigne la tâche de contournement
+                    Function.Call(Hash.CLEAR_PED_TASKS, driver);
+                    Wait(50);
+                    
+                    // Utilise une vitesse adaptée à la situation
+                    float speed = Math.Max(5f, Math.Min(15f, veh.Speed + 3f));
+                    
+                    Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD, driver, veh,
+                        bestTarget.Value.X, bestTarget.Value.Y, bestTarget.Value.Z, 
+                        speed, 0, Function.Call<int>(Hash.GET_ENTITY_MODEL, veh), 
+                        787004, 3f, 0);
+                        
+                    return true;
+                }
+
+                return false;
             }
             catch
             {
@@ -174,31 +200,162 @@ namespace REALIS.TrafficAI
             }
         }
 
-        private void YieldNearbyTraffic(Vehicle blockedVeh)
+        private float GetForwardOffset(Vehicle veh)
+        {
+            // Adapte la distance selon la taille du véhicule
+            float baseOffset = 8f;
+            if (veh.Model.IsBus) return baseOffset + 2f;
+            if (IsLargeVehicle(veh)) return baseOffset + 1.5f;
+            if (veh.Model.IsBike) return baseOffset - 2f;
+            return baseOffset;
+        }
+
+        private float GetSideOffset(Vehicle veh)
+        {
+            // Adapte la distance latérale selon le véhicule
+            float baseOffset = 3.5f;
+            if (veh.Model.IsBus) return baseOffset + 1f;
+            if (IsLargeVehicle(veh)) return baseOffset + 0.5f;
+            if (veh.Model.IsBike) return baseOffset - 1f;
+            return baseOffset;
+        }
+
+        private bool IsLargeVehicle(Vehicle veh)
         {
             try
             {
-                if (blockedVeh == null || !blockedVeh.Exists()) return;
+                if (veh == null || !veh.Exists()) return false;
+                
+                // Vérifie par classe de véhicule
+                var vehicleClass = Function.Call<int>(Hash.GET_VEHICLE_CLASS, veh);
+                
+                // Classes pour véhicules lourds : Commercial (11), Industrial (12), Service (17), Emergency (18)
+                return vehicleClass == 11 || vehicleClass == 12 || vehicleClass == 17 || vehicleClass == 18;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
-                var nearby = World.GetNearbyVehicles(blockedVeh.Position, 10f);
-                if (nearby == null) return;
+        private bool IsRouteClearAndSafe(Vector3 start, Vector3 end, Vehicle ignore)
+        {
+            try
+            {
+                // Test de collision basique
+                var test = ShapeTest.StartTestCapsule(
+                    start + Vector3.WorldUp,
+                    end + Vector3.WorldUp,
+                    2f,
+                    IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles,
+                    ignore);
+                var result = test.GetResult();
+                
+                if (result.result.DidHit) return false;
 
-                foreach (var other in nearby)
+                // Vérification de sécurité : pas trop près d'autres véhicules
+                var nearbyVehicles = World.GetNearbyVehicles(end, 8f);
+                if (nearbyVehicles != null)
                 {
-                    if (other == blockedVeh || other?.Driver == null || !other.Driver.IsAlive)
-                        continue;
-
-                    if (other.Speed > 0.1f && other.Position.DistanceTo(blockedVeh.Position) < 6f)
+                    foreach (var other in nearbyVehicles)
                     {
-                        try
-                        {
-                            Function.Call(Hash.TASK_VEHICLE_TEMP_ACTION, other.Driver, other, 27, 1500);
-                        }
-                        catch { /* Ignore si la tâche échoue */ }
+                        if (other == ignore || other == null || !other.Exists()) continue;
+                        if (other.Position.DistanceTo(end) < 4f) return false;
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void SignalLaneChange(Vehicle changingVehicle, Vector3 targetPosition)
+        {
+            try
+            {
+                // Active les clignotants
+                if (targetPosition.X > changingVehicle.Position.X)
+                {
+                    Function.Call(Hash.SET_VEHICLE_INDICATOR_LIGHTS, changingVehicle, 1, true); // Droite
+                }
+                else
+                {
+                    Function.Call(Hash.SET_VEHICLE_INDICATOR_LIGHTS, changingVehicle, 0, true); // Gauche
+                }
+            }
+            catch { }
+        }
+
+        private void HandleTrafficCourtesy(Vehicle[] nearbyVehicles)
+        {
+            try
+            {
+                if (nearbyVehicles == null) return;
+
+                foreach (var veh in nearbyVehicles)
+                {
+                    if (veh?.Driver == null || !veh.Exists()) continue;
+                    
+                    // Vérifie s'il y a des véhicules bloqués à proximité qui ont besoin de passer
+                    var blockedNearby = FindBlockedVehiclesNeedingSpace(veh, nearbyVehicles);
+                    
+                    if (blockedNearby.Any() && veh.Speed > 0.5f)
+                    {
+                        // Ce véhicule peut laisser passer les autres
+                        OfferCourtesy(veh, blockedNearby);
                     }
                 }
             }
-            catch { /* Ignore les erreurs */ }
+            catch { }
+        }
+
+        private List<Vehicle> FindBlockedVehiclesNeedingSpace(Vehicle checkingVehicle, Vehicle[] allVehicles)
+        {
+            var needingSpace = new List<Vehicle>();
+            
+            try
+            {
+                foreach (var other in allVehicles)
+                {
+                    if (other == checkingVehicle || other?.Driver == null) continue;
+                    
+                    float distance = other.Position.DistanceTo(checkingVehicle.Position);
+                    if (distance > CourtesyDistance) continue;
+                    
+                    // Vérifie si l'autre véhicule est bloqué et a essayé de changer de voie
+                    if (_tracked.TryGetValue(other.Handle, out var info))
+                    {
+                        if (info.BlockedTime > 2f && info.BypassAttempts > 0)
+                        {
+                            needingSpace.Add(other);
+                        }
+                    }
+                }
+            }
+            catch { }
+            
+            return needingSpace;
+        }
+
+        private void OfferCourtesy(Vehicle courteous, List<Vehicle> needingSpace)
+        {
+            try
+            {
+                if (!needingSpace.Any()) return;
+                
+                var driver = courteous.Driver;
+                if (driver == null || !driver.Exists()) return;
+                
+                // Ralentit temporairement pour laisser passer
+                Function.Call(Hash.TASK_VEHICLE_TEMP_ACTION, driver, courteous, 6, 2000); // Ralentir
+                
+                // Petite pause pour que l'autre puisse passer
+                Wait(100);
+            }
+            catch { }
         }
     }
 }
