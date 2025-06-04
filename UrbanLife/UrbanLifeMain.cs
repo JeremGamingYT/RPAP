@@ -146,11 +146,6 @@ namespace REALIS.UrbanLife
                     blipManager.ClearAllBlips();
                     GTA.UI.Notification.PostTicker("~g~Tous les blips d'événements ont été effacés!", false);
                 }
-                else if (e.KeyCode == System.Windows.Forms.Keys.R)
-                {
-                    // SUPPRIMÉ - causait des conflits
-                    GTA.UI.Notification.PostTicker("~r~Touche R désactivée pour éviter les conflits", false);
-                }
                 else if (e.KeyCode == System.Windows.Forms.Keys.F7)
                 {
                     // CORRECTION F7: Protection contre les crashes à répétition

@@ -62,8 +62,10 @@ namespace REALIS.UrbanLife
                 lastInteractionCheck = DateTime.Now;
             }
             
-            // NOUVEAU: Surveiller la stabilité des passagers
-            MonitorPassengerStability();
+            // La surveillance automatique des passagers provoque parfois des
+            // plantages lorsqu'on conduit. Elle est désactivée pour l'instant
+            // pour éviter ces crashs.
+            //MonitorPassengerStability();
             
             // Mettre à jour les événements actifs
             UpdateActiveRoadEvents();
