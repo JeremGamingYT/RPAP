@@ -5,7 +5,6 @@
 ### 🛠️ Correction de build
 - Utilisation correcte de `Game.Player.Wanted` pour ajuster le niveau de recherche
 - Suppression d'un appel invalide `IsFiringWeapon` sur `Ped`
-
 ## Version 1.27 - Enhanced NPC Intelligence (2025-06-02)
 
 ### 🤖 PNJ plus intelligents hors traffic
