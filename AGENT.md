@@ -7,6 +7,34 @@
 - Référez-vous aux exemples de scripts existants pour comprendre les modèles de conception recommandés
 - Utilisez uniquement les versions compatibles : l'ASI et les DLL doivent provenir de la même version SHVDN
 
+### Processus de build et compilation
+
+#### Installation de l'environnement .NET
+```bash
+# Installation de .NET 8.0
+curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0
+export PATH="$HOME/.dotnet:$PATH"
+
+# Ajout des packages nécessaires
+dotnet add package Newtonsoft.Json --version 13.0.3
+```
+
+#### Processus de build propre
+```bash
+# TOUJOURS nettoyer avant de construire
+dotnet clean
+
+# Build du projet
+dotnet build
+```
+
+#### Règles de compilation
+- **OBLIGATOIRE** : Exécuter `dotnet clean` avant chaque build
+- Vérifier que tous les packages NuGet sont à jour et compatibles
+- Tester la compilation dans un environnement propre (sans cache)
+- S'assurer que toutes les références ScriptHookVDotNet sont de la même version
+- Éviter les builds partiels qui peuvent laisser des fichiers corrompus
+
 ### Architecture de base d'un script
 ```csharp
 public class MonScript : Script
@@ -198,4 +226,10 @@ private void LogError(string message)
 - [ ] Pas d'opérations lourdes dans OnTick
 - [ ] Toutes les entités sont vérifiées avant utilisation
 - [ ] Les limites de création d'entités sont respectées
+- [ ] Le mod fonctionne avec d'autres mods populaires
+- [ ] Testé sur différentes versions de GTA V
 - [ ] Pas de fuites mémoire détectées
+- [ ] Documentation utilisateur fournie
+- [ ] Build propre effectué avec `dotnet clean` puis `dotnet build`
+- [ ] Toutes les dépendances sont correctement référencées
+- [ ] Code compilé sans warnings dans un environnement propre
