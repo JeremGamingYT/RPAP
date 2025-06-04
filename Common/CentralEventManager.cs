@@ -114,7 +114,6 @@ namespace REALIS.Common
         #region Vehicle Management
 
         private const int LOCK_COOLDOWN_MS = 250;
-
         public bool TryLockVehicle(int vehicleHandle, string requesterId, int priority = 0)
         {
             var state = GetVehicleState(vehicleHandle);
@@ -122,6 +121,7 @@ namespace REALIS.Common
             if (_lockedVehicles.Contains(vehicleHandle))
             {
                 if (state.LockPriority > priority && state.LockedBy != requesterId)
+                if (state.LockPriority > priority)
                 {
                     Logger.Info($"Lock denied on {vehicleHandle} for {requesterId}; locked by {state.LockedBy} (p{state.LockPriority})");
                     return false;
@@ -150,6 +150,15 @@ namespace REALIS.Common
             state.LockedBy = requesterId;
             state.LockPriority = priority;
             state.LastLockTime = DateTime.Now;
+                Logger.Info($"Lock override on {vehicleHandle}: {state.LockedBy} -> {requesterId} (p{priority})");
+                state.LockedBy = requesterId;
+                state.LockPriority = priority;
+                return true;
+            }
+
+            _lockedVehicles.Add(vehicleHandle);
+            state.LockedBy = requesterId;
+            state.LockPriority = priority;
             Logger.Info($"Vehicle {vehicleHandle} locked by {requesterId} (p{priority})");
             return true;
         }
