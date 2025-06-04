@@ -381,8 +381,9 @@ namespace REALIS.UrbanLife
             interventionSystem.Update();
             
             // Vérifier les événements NPCRoadRage
-            NPCRoadRageIntegration.CheckForRoadRageEvents();
-            NPCRoadRageIntegration.DetectCollisionEvents();
+            // Désactivé car la détection peut provoquer un crash
+            //NPCRoadRageIntegration.CheckForRoadRageEvents();
+            //NPCRoadRageIntegration.DetectCollisionEvents();
             
             // Vérifier les événements spéciaux (garder pour compatibilité mais réduire la fréquence)
             CheckForSpecialEvents();
