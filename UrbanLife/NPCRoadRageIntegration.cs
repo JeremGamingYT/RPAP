@@ -2,6 +2,7 @@ using GTA;
 using GTA.Math;
 using System;
 using System.Reflection;
+using REALIS.Common;
 
 namespace REALIS.UrbanLife
 {
@@ -118,7 +119,7 @@ namespace REALIS.UrbanLife
                 var playerVehicle = player.CurrentVehicle;
                 
                 // Vérifier les véhicules endommagés à proximité
-                var nearbyVehicles = World.GetNearbyVehicles(player.Position, 30.0f);
+                var nearbyVehicles = VehicleQueryService.GetNearbyVehicles(player.Position, 30.0f);
                 
                 foreach (var vehicle in nearbyVehicles)
                 {

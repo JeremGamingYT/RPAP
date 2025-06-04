@@ -27,6 +27,20 @@ namespace REALIS.UrbanLife
         private DateTime lastFKeyPress = DateTime.MinValue;
         private DateTime lastGKeyPress = DateTime.MinValue;
         private const double KEY_COOLDOWN_SECONDS = 1.0; // 1 seconde entre chaque appui
+
+        private void ExecuteVehicleAction(Vehicle veh, Action action)
+        {
+            if (!VehicleQueryService.TryAcquireControl(veh))
+                return;
+            try
+            {
+                action();
+            }
+            finally
+            {
+                VehicleQueryService.ReleaseControl(veh);
+            }
+        }
         
         // Configuration
         private const float EVENT_CREATION_DISTANCE_MIN = 80.0f;
@@ -669,8 +683,10 @@ namespace REALIS.UrbanLife
                     if (elapsedTime.TotalSeconds > 15)
                     {
                         // Retour aux véhicules
-                        civilian.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Driver);
-                        officer.Task.EnterVehicle(roadEvent.Vehicles[1], VehicleSeat.Driver);
+                        ExecuteVehicleAction(roadEvent.Vehicles[0], () =>
+                            civilian.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Driver));
+                        ExecuteVehicleAction(roadEvent.Vehicles[1], () =>
+                            officer.Task.EnterVehicle(roadEvent.Vehicles[1], VehicleSeat.Driver));
                         roadEvent.Phase = 3;
                     }
                     break;
@@ -680,8 +696,10 @@ namespace REALIS.UrbanLife
                         if (civilian.IsInVehicle() && officer.IsInVehicle())
                         {
                             // Partir dans des directions différentes
-                            Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, civilian, roadEvent.Vehicles[0], 15.0f, 786603);
-                            Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, officer, roadEvent.Vehicles[1], 15.0f, 786603);
+                            ExecuteVehicleAction(roadEvent.Vehicles[0], () =>
+                                Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, civilian, roadEvent.Vehicles[0], 15.0f, 786603));
+                            ExecuteVehicleAction(roadEvent.Vehicles[1], () =>
+                                Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, officer, roadEvent.Vehicles[1], 15.0f, 786603));
                         }
                         roadEvent.Phase = 4; // Marqué pour suppression
                     }
@@ -904,7 +922,8 @@ namespace REALIS.UrbanLife
                                 }
                                 
                                 // Les deux sont dans la dépanneuse, on peut partir DÉFINITIVEMENT
-                                Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, towDriver, roadEvent.TowTruck, 25.0f, 786603);
+                                ExecuteVehicleAction(roadEvent.TowTruck, () =>
+                                    Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, towDriver, roadEvent.TowTruck, 25.0f, 786603));
                                 GTA.UI.Notification.PostTicker("~b~La dépanneuse repart avec le conducteur et le véhicule!", false);
                                 
                                 // NOUVEAU: Nettoyer le véhicule en panne maintenant qu'on part
@@ -957,7 +976,8 @@ namespace REALIS.UrbanLife
                     {
                         if (driver.IsInVehicle())
                         {
-                            Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, driver, roadEvent.Vehicles[0], 20.0f, 786603);
+                            ExecuteVehicleAction(roadEvent.Vehicles[0], () =>
+                                Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, driver, roadEvent.Vehicles[0], 20.0f, 786603));
                         }
                         roadEvent.Phase = 95; // Marqué pour suppression
                     }
@@ -1687,9 +1707,12 @@ namespace REALIS.UrbanLife
                 case 3: // Départ
                     if (elapsedTime.TotalSeconds > 25)
                     {
-                        paramedic1.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Driver);
-                        paramedic2.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Passenger);
-                        patient.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.LeftRear);
+                        ExecuteVehicleAction(roadEvent.Vehicles[0], () =>
+                        {
+                            paramedic1.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Driver);
+                            paramedic2.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.Passenger);
+                            patient.Task.EnterVehicle(roadEvent.Vehicles[0], VehicleSeat.LeftRear);
+                        });
                         roadEvent.Phase = 4;
                     }
                     break;
