@@ -129,6 +129,8 @@ namespace REALIS.TrafficAI
                 2f,
                 IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds,
                 ignore);
+            var (_, res) = test.GetResult();
+            return !res.DidHit;
             var result = test.GetResult();
             return !result.DidHit;
         }
