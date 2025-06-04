@@ -111,298 +111,420 @@ public class NPCRoadRage : Script
 
     private void OnTick(object sender, EventArgs e)
     {
-        Ped player = Game.Player.Character;
-
-        if (Game.IsCutsceneActive || player == null || !player.Exists() || player.IsDead)
+        try
         {
-            if(_policeDispatched || _npcReacting || _policeInteractionActive || _makingPoliceDecision) {
-                Log("Game state changed (cutscene/player dead). Forcing cleanup of active incident.");
-                FullResetOfScriptStates(); 
-            }
-            return;
-        }
+            Ped player = Game.Player.Character;
 
-        if ((_policeInteractionActive || _makingPoliceDecision) && _policeVehicle != null && _policeVehicle.Exists()) {
-            // Vérifier la distance par rapport au lieu de l'incident OU aux officiers, pas seulement au véhicule
-            float distanceToIncident = player.Position.DistanceTo(_incidentLocation);
-            float distanceToVehicle = player.Position.DistanceTo(_policeVehicle.Position);
-            
-            // Trouver l'officier le plus proche
-            float distanceToNearestOfficer = float.MaxValue;
-            foreach (Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive))
+            if (Game.IsCutsceneActive || player == null || !player.Exists() || player.IsDead)
             {
-                float officerDistance = player.Position.DistanceTo(officer.Position);
-                if (officerDistance < distanceToNearestOfficer)
-                {
-                    distanceToNearestOfficer = officerDistance;
+                if(_policeDispatched || _npcReacting || _policeInteractionActive || _makingPoliceDecision) {
+                    Log("Game state changed (cutscene/player dead). Forcing cleanup of active incident.");
+                    FullResetOfScriptStates(); 
                 }
-            }
-            
-            // Le joueur a quitté la scène SEULEMENT s'il est loin de TOUT : incident, véhicule ET officiers
-            bool tooFarFromIncident = distanceToIncident > MaxInteractionDistance * 1.5f; // Plus tolérant pour l'incident
-            bool tooFarFromVehicle = distanceToVehicle > MaxInteractionDistance * 2.0f; // Beaucoup plus tolérant pour le véhicule
-            bool tooFarFromOfficers = distanceToNearestOfficer > MaxInteractionDistance; // Distance normale pour les officiers
-            
-            if (tooFarFromIncident && tooFarFromVehicle && tooFarFromOfficers) {
-                Log($"Player moved too far during police interaction. Distances - Incident: {distanceToIncident:F2}, Vehicle: {distanceToVehicle:F2}, Nearest Officer: {distanceToNearestOfficer:F2}. Aborting.");
-                GTA.UI.Notification.PostTicker("You left the scene of the incident.", false, false);
-                EndPoliceInteraction(false, true); 
                 return;
             }
-        }
 
-        if (PoliceCalled && _collidedNpcPed != null && _collidedNpcPed.Exists() && _collidedNpcPed.IsAlive && !_npcReacting) {
-            float npcDistanceToIncident = _collidedNpcPed.Position.DistanceTo(_incidentLocation);
-            if (npcDistanceToIncident > 15f) {
-                Log($"NPC {_collidedNpcPed.Handle} drifted too far from incident scene ({npcDistanceToIncident:F2}m). Bringing back.");
-                _collidedNpcPed.Task.ClearAll();
-                Script.Wait(50);
-                _collidedNpcPed.BlockPermanentEvents = true;
-                _collidedNpcPed.Task.FollowNavMeshTo(_incidentLocation);
-            } else if (!_collidedNpcPed.IsWalking && !_collidedNpcPed.IsRunning && npcDistanceToIncident < 10f) {
-                // S'assurer qu'il reste en place s'il est proche
-                _collidedNpcPed.Task.GuardCurrentPosition();
-            }
-        }
-
-        // Vérifier si le NPC est rentré dans son véhicule pour programmer son départ
-        if (_collidedNpcPed != null && _collidedNpcPed.Exists() && _collidedNpcVehicle != null && _collidedNpcVehicle.Exists() &&
-            !_npcReacting && !_policeInteractionActive && !_makingPoliceDecision && !PoliceCalled &&
-            _collidedNpcPed.IsInVehicle(_collidedNpcVehicle))
-        {
-            Log($"NPC {_collidedNpcPed.Handle} has entered vehicle. Programming departure.");
-            ProgramNpcDeparture();
-            
-            // Nettoyer les références après avoir programmé le départ
-            _collidedNpcPed = null;
-            _collidedNpcVehicle = null;
-            _currentReaction = NpcReactionType.None;
-        }
-
-        if (PoliceCalled && !_policeDispatched && !_policeInteractionActive && !_makingPoliceDecision && !_policeArrived)
-        {
-            Log("PoliceCalled is true and police not yet dispatched. Initiating police response.");
-            Vector3 locationForPolice = (_incidentLocation != Vector3.Zero) ? _incidentLocation : player.Position;
-            DispatchPolice(locationForPolice);
-        }
-        else if (_policeDispatched && !_policeArrived && !_policeInteractionActive && !_makingPoliceDecision)
-        {
-            CheckPoliceArrival();
-        }
-        else if (_policeInteractionActive)
-        {
-            ProcessPoliceInteraction();
-        }
-        else if (_makingPoliceDecision)
-        {
-            ProcessPoliceDecisionOutcome();
-        }
-        else if (_npcReacting)
-        {
-            ProcessNpcReaction();
-        }
-        else 
-        {
-            if (_policeDispatched || _policeArrived) {
-                 if((_policeDispatched || _policeArrived) && !PoliceCalled && !_makingPoliceDecision && !_policeInteractionActive) { 
-                    Log("Anomaly detected: Police dispatched/arrived but no incident active. Resetting.");
-                    FullResetOfScriptStates();
-                 }
-                 return;
-            }
-
-            Vehicle playerVeh = player.CurrentVehicle; 
-            // Permettre la détection même si le joueur n'est plus dans le véhicule (après un accident récent)
-            if (playerVeh == null && DateTime.Now > _stateTimer + TimeSpan.FromSeconds(30)) return;
-            
-            // Si le joueur vient de descendre de son véhicule récemment, ne pas chercher de nouveaux accidents
-            if (playerVeh == null) return;
-
-            Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerVeh.Position, 7.0f)
-                                             .Where(v => v != null && v.Exists() && v != playerVeh)
-                                             .ToArray();
-
-            foreach (Vehicle npcVehicle in nearbyVehicles)
-            {
-                if (npcVehicle == null || !npcVehicle.Exists()) continue; 
-                if (_npcCollisionCooldowns.ContainsKey(npcVehicle.Handle) && DateTime.Now < _npcCollisionCooldowns[npcVehicle.Handle]) continue;
+            if ((_policeInteractionActive || _makingPoliceDecision) && _policeVehicle != null && _policeVehicle.Exists()) {
+                // Vérifier la distance par rapport au lieu de l'incident OU aux officiers, pas seulement au véhicule
+                float distanceToIncident = player.Position.DistanceTo(_incidentLocation);
+                float distanceToVehicle = player.Position.DistanceTo(_policeVehicle.Position);
                 
-                Ped npcDriver = npcVehicle.Driver;
-                if (npcDriver != null && npcDriver.Exists() && npcDriver.IsHuman && !npcDriver.IsPlayer)
+                // Trouver l'officier le plus proche
+                float distanceToNearestOfficer = float.MaxValue;
+                foreach (Ped officer in _respondingPolicePeds.Where(o => o != null && o.Exists() && o.IsAlive))
                 {
-                    bool isTouching = playerVeh.IsTouching(npcVehicle); 
-                    bool playerDamagedNpc = playerVeh.HasBeenDamagedBy(npcVehicle); 
-                    bool npcDamagedPlayer = npcVehicle.HasBeenDamagedBy(playerVeh);
-                    
-                    // Détection de collision STRICTE - seulement pour de vraies collisions avec impact
-                    float distance = playerVeh.Position.DistanceTo(npcVehicle.Position);
-                    float playerSpeed = playerVeh.Speed;
-                    float npcSpeed = npcVehicle.Speed;
-                    
-                    // Collision significative : il faut AU MOINS une des conditions suivantes :
-                    // 1. Dommages réels détectés (le plus fiable)
-                    // 2. Contact physique + vitesse élevée (impact réel)
-                    // 3. Distance très proche + vitesse très élevée (collision imminente/en cours)
-                    
-                    bool realDamage = playerDamagedNpc || npcDamagedPlayer;
-                    bool significantImpact = isTouching && (playerSpeed > MinSpeedForSignificantImpact || npcSpeed > MinSpeedForSignificantImpact); // Vitesse plus élevée requise
-                    bool highSpeedCollision = distance < MaxDistanceForHighSpeedCollision && playerSpeed > MinSpeedForHighSpeedCollision; // Distance très proche + vitesse très élevée
-                    
-                    // Une vraie collision nécessite des dommages OU un impact significatif
-                    bool isRealCollision = realDamage || significantImpact || highSpeedCollision;
-
-                    if (isRealCollision)
+                    float officerDistance = player.Position.DistanceTo(officer.Position);
+                    if (officerDistance < distanceToNearestOfficer)
                     {
-                        Log($"REAL Collision detected: PlayerVehicle ({playerVeh.Model.Hash}) with NPCDriver ({npcDriver.Model.Hash}) in NPCVehicle ({npcVehicle.Model.Hash}). Distance: {distance:F2}, PlayerSpeed: {playerSpeed:F2}, NPCSpeed: {npcSpeed:F2}, Touch: {isTouching}, RealDamage: {realDamage}, SigImpact: {significantImpact}, HighSpeed: {highSpeedCollision}");
-                        
-                        // Validate NPC is suitable for reaction
-                        if (!npcDriver.IsInVehicle(npcVehicle) || npcDriver.IsDead || npcDriver.IsInjured) {
-                             Log("NPC no longer valid for reaction (not in vehicle or dead/injured). Applying cooldown.");
-                            _npcCollisionCooldowns[npcVehicle.Handle] = DateTime.Now + _npcCollisionCooldownDuration;
-                            continue; 
-                        }
-                        
-                        FullResetOfScriptStates(); 
-
-                        _collidedNpcPed = npcDriver;
-                        _collidedNpcVehicle = npcVehicle; 
-
-                        _incidentLocation = npcVehicle.Position; 
-                        _npcReacting = true;
-                        _stateTimer = DateTime.Now; 
-
-                        // Determine reaction type
-                        int randomChance = _random.Next(0, 100);
-                        if (randomChance < AggressiveNpcChancePercent) {
-                            _currentReaction = NpcReactionType.Aggressive;
-                        } else {
-                            _currentReaction = NpcReactionType.CallPolice;
-                        }
-                        
-                        Log($"NPC {_collidedNpcPed.Handle} will react with: {_currentReaction} (roll: {randomChance}) at {_incidentLocation}");
-                        _npcCollisionCooldowns[npcVehicle.Handle] = DateTime.Now + _npcCollisionCooldownDuration;
-                        GTA.UI.Notification.PostTicker($"NPC {npcDriver.Handle} is reacting to collision with type: {_currentReaction}!", false, false);
-                        return; // Process reaction on next tick
-                    }
-                    else if (distance < 3.0f || isTouching)
-                    {
-                        // Log pour débogage : proximité détectée mais pas de collision valide
-                        Log($"Near miss detected: PlayerVehicle with NPCVehicle ({npcVehicle.Model.Hash}). Distance: {distance:F2}, PlayerSpeed: {playerSpeed:F2}, NPCSpeed: {npcSpeed:F2}, Touch: {isTouching}, RealDamage: {realDamage} - NO collision triggered");
+                        distanceToNearestOfficer = officerDistance;
                     }
                 }
+                
+                // Le joueur a quitté la scène SEULEMENT s'il est loin de TOUT : incident, véhicule ET officiers
+                bool tooFarFromIncident = distanceToIncident > MaxInteractionDistance * 1.5f; // Plus tolérant pour l'incident
+                bool tooFarFromVehicle = distanceToVehicle > MaxInteractionDistance * 2.0f; // Beaucoup plus tolérant pour le véhicule
+                bool tooFarFromOfficers = distanceToNearestOfficer > MaxInteractionDistance; // Distance normale pour les officiers
+                
+                if (tooFarFromIncident && tooFarFromVehicle && tooFarFromOfficers) {
+                    Log($"Player moved too far during police interaction. Distances - Incident: {distanceToIncident:F2}, Vehicle: {distanceToVehicle:F2}, Nearest Officer: {distanceToNearestOfficer:F2}. Aborting.");
+                    GTA.UI.Notification.PostTicker("You left the scene of the incident.", false, false);
+                    EndPoliceInteraction(false, true); 
+                    return;
+                }
+            }
+
+            if (PoliceCalled && _collidedNpcPed != null && _collidedNpcPed.Exists() && _collidedNpcPed.IsAlive && !_npcReacting) {
+                float npcDistanceToIncident = _collidedNpcPed.Position.DistanceTo(_incidentLocation);
+                if (npcDistanceToIncident > 15f) {
+                    Log($"NPC {_collidedNpcPed.Handle} drifted too far from incident scene ({npcDistanceToIncident:F2}m). Bringing back.");
+                    _collidedNpcPed.Task.ClearAll();
+                    Script.Wait(50);
+                    _collidedNpcPed.BlockPermanentEvents = true;
+                    _collidedNpcPed.Task.FollowNavMeshTo(_incidentLocation);
+                } else if (!_collidedNpcPed.IsWalking && !_collidedNpcPed.IsRunning && npcDistanceToIncident < 10f) {
+                    // S'assurer qu'il reste en place s'il est proche
+                    _collidedNpcPed.Task.GuardCurrentPosition();
+                }
+            }
+
+            // Vérifier si le NPC est rentré dans son véhicule pour programmer son départ
+            if (_collidedNpcPed != null && _collidedNpcPed.Exists() && _collidedNpcVehicle != null && _collidedNpcVehicle.Exists() &&
+                !_npcReacting && !_policeInteractionActive && !_makingPoliceDecision && !PoliceCalled &&
+                _collidedNpcPed.IsInVehicle(_collidedNpcVehicle))
+            {
+                Log($"NPC {_collidedNpcPed.Handle} has entered vehicle. Programming departure.");
+                ProgramNpcDeparture();
+                
+                // Nettoyer les références après avoir programmé le départ
+                _collidedNpcPed = null;
+                _collidedNpcVehicle = null;
+                _currentReaction = NpcReactionType.None;
+            }
+
+            if (PoliceCalled && !_policeDispatched && !_policeInteractionActive && !_makingPoliceDecision && !_policeArrived)
+            {
+                Log("PoliceCalled is true and police not yet dispatched. Initiating police response.");
+                Vector3 locationForPolice = (_incidentLocation != Vector3.Zero) ? _incidentLocation : player.Position;
+                DispatchPolice(locationForPolice);
+            }
+            else if (_policeDispatched && !_policeArrived && !_policeInteractionActive && !_makingPoliceDecision)
+            {
+                CheckPoliceArrival();
+            }
+            else if (_policeInteractionActive)
+            {
+                ProcessPoliceInteraction();
+            }
+            else if (_makingPoliceDecision)
+            {
+                ProcessPoliceDecisionOutcome();
+            }
+            else if (_npcReacting)
+            {
+                ProcessNpcReaction();
+            }
+            else 
+            {
+                if (_policeDispatched || _policeArrived) {
+                     if((_policeDispatched || _policeArrived) && !PoliceCalled && !_makingPoliceDecision && !_policeInteractionActive) { 
+                        Log("Anomaly detected: Police dispatched/arrived but no incident active. Resetting.");
+                        FullResetOfScriptStates();
+                     }
+                     return;
+                }
+
+                Vehicle playerVeh = player.CurrentVehicle; 
+                // Permettre la détection même si le joueur n'est plus dans le véhicule (après un accident récent)
+                if (playerVeh == null && DateTime.Now > _stateTimer + TimeSpan.FromSeconds(30)) return;
+                
+                // Si le joueur vient de descendre de son véhicule récemment, ne pas chercher de nouveaux accidents
+                if (playerVeh == null) return;
+
+                Vehicle[] nearbyVehicles = World.GetNearbyVehicles(playerVeh.Position, 7.0f)
+                                                 .Where(v => v != null && v.Exists() && v != playerVeh)
+                                                 .ToArray();
+
+                foreach (Vehicle npcVehicle in nearbyVehicles)
+                {
+                    // Vérifications sécurisées plus complètes
+                    if (npcVehicle == null) continue;
+                    
+                    try 
+                    {
+                        // Vérifier que le véhicule existe toujours et est valide
+                        if (!npcVehicle.Exists() || npcVehicle.IsDead) continue;
+                        
+                        if (_npcCollisionCooldowns.ContainsKey(npcVehicle.Handle) && DateTime.Now < _npcCollisionCooldowns[npcVehicle.Handle]) continue;
+                        
+                        // Vérification sécurisée du conducteur
+                        Ped? npcDriver = null;
+                        try
+                        {
+                            npcDriver = npcVehicle.Driver;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"Error accessing Driver for vehicle {npcVehicle.Handle}: {ex.Message}");
+                            continue;
+                        }
+                        
+                        if (npcDriver == null || !npcDriver.Exists() || !npcDriver.IsHuman || npcDriver.IsPlayer || npcDriver.IsDead) continue;
+                        
+                        // Variables pour les vérifications de collision avec gestion d'erreur
+                        bool isTouching = false;
+                        bool playerDamagedNpc = false;
+                        bool npcDamagedPlayer = false;
+                        float distance = float.MaxValue;
+                        float playerSpeed = 0f;
+                        float npcSpeed = 0f;
+                        
+                        try
+                        {
+                            // Vérifier que le véhicule du joueur existe toujours
+                            if (playerVeh == null || !playerVeh.Exists()) continue;
+                            
+                            isTouching = playerVeh.IsTouching(npcVehicle);
+                            playerDamagedNpc = playerVeh.HasBeenDamagedBy(npcVehicle);
+                            npcDamagedPlayer = npcVehicle.HasBeenDamagedBy(playerVeh);
+                            distance = playerVeh.Position.DistanceTo(npcVehicle.Position);
+                            playerSpeed = playerVeh.Speed;
+                            npcSpeed = npcVehicle.Speed;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"Error during collision detection for vehicle {npcVehicle.Handle}: {ex.Message}");
+                            continue;
+                        }
+                        
+                        // Détection de collision STRICTE - seulement pour de vraies collisions avec impact
+                        // Collision significative : il faut AU MOINS une des conditions suivantes :
+                        // 1. Dommages réels détectés (le plus fiable)
+                        // 2. Contact physique + vitesse élevée (impact réel)
+                        // 3. Distance très proche + vitesse très élevée (collision imminente/en cours)
+                        
+                        bool realDamage = playerDamagedNpc || npcDamagedPlayer;
+                        bool significantImpact = isTouching && (playerSpeed > MinSpeedForSignificantImpact || npcSpeed > MinSpeedForSignificantImpact);
+                        bool highSpeedCollision = distance < MaxDistanceForHighSpeedCollision && playerSpeed > MinSpeedForHighSpeedCollision;
+                        
+                        // Une vraie collision nécessite des dommages OU un impact significatif
+                        bool isRealCollision = realDamage || significantImpact || highSpeedCollision;
+
+                        if (isRealCollision)
+                        {
+                            Log($"REAL Collision detected: PlayerVehicle ({playerVeh.Model.Hash}) with NPCDriver ({npcDriver.Model.Hash}) in NPCVehicle ({npcVehicle.Model.Hash}). Distance: {distance:F2}, PlayerSpeed: {playerSpeed:F2}, NPCSpeed: {npcSpeed:F2}, Touch: {isTouching}, RealDamage: {realDamage}, SigImpact: {significantImpact}, HighSpeed: {highSpeedCollision}");
+                            
+                            // Validate NPC is suitable for reaction avec vérifications supplémentaires
+                            try
+                            {
+                                if (!npcDriver.Exists() || !npcDriver.IsInVehicle(npcVehicle) || npcDriver.IsDead || npcDriver.IsInjured) 
+                                {
+                                    Log("NPC no longer valid for reaction (not in vehicle or dead/injured). Applying cooldown.");
+                                    _npcCollisionCooldowns[npcVehicle.Handle] = DateTime.Now + _npcCollisionCooldownDuration;
+                                    continue; 
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"Error validating NPC for reaction: {ex.Message}");
+                                continue;
+                            }
+                            
+                            FullResetOfScriptStates(); 
+
+                            _collidedNpcPed = npcDriver;
+                            _collidedNpcVehicle = npcVehicle; 
+
+                            _incidentLocation = npcVehicle.Position; 
+                            _npcReacting = true;
+                            _stateTimer = DateTime.Now; 
+
+                            // Determine reaction type
+                            int randomChance = _random.Next(0, 100);
+                            if (randomChance < AggressiveNpcChancePercent) {
+                                _currentReaction = NpcReactionType.Aggressive;
+                            } else {
+                                _currentReaction = NpcReactionType.CallPolice;
+                            }
+                            
+                            Log($"NPC {_collidedNpcPed.Handle} will react with: {_currentReaction} (roll: {randomChance}) at {_incidentLocation}");
+                            _npcCollisionCooldowns[npcVehicle.Handle] = DateTime.Now + _npcCollisionCooldownDuration;
+                            GTA.UI.Notification.PostTicker($"NPC {npcDriver.Handle} is reacting to collision with type: {_currentReaction}!", false, false);
+                            return; // Process reaction on next tick
+                        }
+                        else if (distance < 3.0f || isTouching)
+                        {
+                            // Log pour débogage : proximité détectée mais pas de collision valide
+                            Log($"Near miss detected: PlayerVehicle with NPCVehicle ({npcVehicle.Model.Hash}). Distance: {distance:F2}, PlayerSpeed: {playerSpeed:F2}, NPCSpeed: {npcSpeed:F2}, Touch: {isTouching}, RealDamage: {realDamage} - NO collision triggered");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"General error processing vehicle {npcVehicle?.Handle ?? -1}: {ex.Message}");
+                        // Ajouter un cooldown pour éviter de retraiter ce véhicule immédiatement
+                        if (npcVehicle != null && npcVehicle.Exists())
+                        {
+                            _npcCollisionCooldowns[npcVehicle.Handle] = DateTime.Now + TimeSpan.FromSeconds(5);
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Critical error in OnTick: {ex.Message}. Stack trace: {ex.StackTrace}");
+            // Try to clean up state to prevent persistent errors
+            try
+            {
+                FullResetOfScriptStates();
+            }
+            catch (Exception cleanupEx)
+            {
+                Log($"Error during emergency cleanup: {cleanupEx.Message}");
             }
         }
     }
     
     private void ProcessNpcReaction()
     {
-        if (_collidedNpcPed == null || !_collidedNpcPed.Exists() || _collidedNpcPed.IsDead) {
-            Log("Collided NPC is no longer valid. Resetting NPC reaction state.");
-            ResetNpcReactionState();
-            return;
-        }
-        if (DateTime.Now > _stateTimer + _npcReactionTimeoutDuration) {
-            Log($"NPC reaction for {_collidedNpcPed.Handle} timed out. Resetting.");
-            ResetNpcReactionState();
-            return;
-        }
+        try
+        {
+            if (_collidedNpcPed == null || !_collidedNpcPed.Exists() || _collidedNpcPed.IsDead) {
+                Log("Collided NPC is no longer valid. Resetting NPC reaction state.");
+                ResetNpcReactionState();
+                return;
+            }
+            if (DateTime.Now > _stateTimer + _npcReactionTimeoutDuration) {
+                Log($"NPC reaction for {_collidedNpcPed.Handle} timed out. Resetting.");
+                ResetNpcReactionState();
+                return;
+            }
 
-        // Check if NPC is still in vehicle and needs to exit
-        if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists() && _collidedNpcPed.IsInVehicle(_collidedNpcVehicle))
-        {
-            // Force NPC to exit vehicle if not already doing so
-            bool isLeavingVehicle = Function.Call<bool>(Hash.GET_IS_TASK_ACTIVE, _collidedNpcPed.Handle, 2); // Task type 2 = exiting vehicle
-            if (!isLeavingVehicle) 
+            // Check if NPC is still in vehicle and needs to exit
+            try
             {
-                Log($"Forcing NPC {_collidedNpcPed.Handle} to leave vehicle {_collidedNpcVehicle.Handle}.");
-                _collidedNpcPed.Task.LeaveVehicle(_collidedNpcVehicle, false);
-                return; // Wait for next tick
-            }
-            else
-            {
-                Log($"NPC {_collidedNpcPed.Handle} is already exiting vehicle, waiting...");
-                return; // Still exiting, wait
-            }
-        }
-        
-        // NPC is now out of vehicle, execute the reaction
-        switch (_currentReaction)
-        {
-            case NpcReactionType.Aggressive:
-                Log($"NPC {_collidedNpcPed.Handle} is out of vehicle. Becoming aggressive towards player.");
-                _collidedNpcPed.Task.ClearAll(); 
-                Script.Wait(100); // Small delay to ensure task clear
-                
-                // Empêcher le NPC de remonter dans le véhicule
-                _collidedNpcPed.BlockPermanentEvents = true;
-                _collidedNpcPed.CanRagdoll = true;
-                
-                // Marquer le véhicule comme plus nécessaire pour éviter que le NPC y retourne
-                if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists()) {
-                    _collidedNpcVehicle.MarkAsNoLongerNeeded();
-                }
-                
-                _collidedNpcPed.Task.Combat(Game.Player.Character);
-                Log($"NPC {_collidedNpcPed.Handle} set to combat mode against player.");
-                ResetNpcReactionState(); 
-                break;
-                
-            case NpcReactionType.CallPolice:
-                // Check if we haven't called police yet
-                if (!PoliceCalled) 
+                if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists() && _collidedNpcPed.IsInVehicle(_collidedNpcVehicle))
                 {
-                    Log($"NPC {_collidedNpcPed.Handle} is calling the police!");
-                    
-                    // Make NPC look scared and call police
-                    _collidedNpcPed.Task.ClearAll();
-                    Script.Wait(100);
-                    
-                    // Empêcher le NPC de partir ou de remonter dans le véhicule
-                    _collidedNpcPed.BlockPermanentEvents = true;
-                    
-                    // Marquer le véhicule comme plus nécessaire pour éviter que le NPC y retourne
-                    if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists()) {
-                        _collidedNpcVehicle.MarkAsNoLongerNeeded();
+                    // Force NPC to exit vehicle if not already doing so
+                    bool isLeavingVehicle = false;
+                    try
+                    {
+                        isLeavingVehicle = Function.Call<bool>(Hash.GET_IS_TASK_ACTIVE, _collidedNpcPed.Handle, 2); // Task type 2 = exiting vehicle
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Error checking if NPC is leaving vehicle: {ex.Message}");
+                        isLeavingVehicle = false;
                     }
                     
-                    // Use hands up animation and make NPC stay at location
-                    _collidedNpcPed.Task.HandsUp(5000); // Hands up for 5 seconds
-                    
-                    // Set police called flag
-                    PoliceCalled = true; 
-                    _stateTimer = DateTime.Now; 
-                    Log($"PoliceCalled flag set to true by NPC {_collidedNpcPed.Handle}. Incident at: {_incidentLocation}");
-                    GTA.UI.Notification.PostTicker("An NPC is calling the police!", false, false);
-                    
-                    // Don't reset - keep the NPC around for police interaction
-                    _npcReacting = false; // Stop the reaction loop but keep the NPC alive
-                }
-                else
-                {
-                    // Police already called, make NPC wait nearby and NOT flee
-                    // Force NPC to stay at incident location permanently
-                    _collidedNpcPed.BlockPermanentEvents = true;
-                    
-                    if (_collidedNpcPed.Position.DistanceTo(_incidentLocation) > 8f)
+                    if (!isLeavingVehicle) 
                     {
-                        _collidedNpcPed.Task.ClearAll();
-                        Script.Wait(50);
-                        _collidedNpcPed.Task.FollowNavMeshTo(_incidentLocation);
-                        Log($"NPC {_collidedNpcPed.Handle} too far from incident, bringing back to scene.");
+                        Log($"Forcing NPC {_collidedNpcPed.Handle} to leave vehicle {_collidedNpcVehicle.Handle}.");
+                        try
+                        {
+                            _collidedNpcPed.Task.LeaveVehicle(_collidedNpcVehicle, false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"Error forcing NPC to leave vehicle: {ex.Message}");
+                        }
+                        return; // Wait for next tick
                     }
                     else
                     {
-                        // S'assurer que le NPC reste sur place et ne fuit pas
-                        // Utiliser GuardCurrentPosition pour qu'il reste vraiment sur place
-                        if (!_collidedNpcPed.IsWalking && !_collidedNpcPed.IsRunning) {
-                            _collidedNpcPed.Task.ClearAll();
-                            Script.Wait(50);
-                            _collidedNpcPed.Task.GuardCurrentPosition();
-                            Log($"NPC {_collidedNpcPed.Handle} set to guard current position.");
-                        }
+                        Log($"NPC {_collidedNpcPed.Handle} is already exiting vehicle, waiting...");
+                        return; // Still exiting, wait
                     }
                 }
-                break;
+            }
+            catch (Exception ex)
+            {
+                Log($"Error during vehicle exit check: {ex.Message}");
+                // Continue with reaction processing even if vehicle check fails
+            }
+            
+            // NPC is now out of vehicle, execute the reaction
+            switch (_currentReaction)
+            {
+                case NpcReactionType.Aggressive:
+                    try
+                    {
+                        Log($"NPC {_collidedNpcPed.Handle} is out of vehicle. Becoming aggressive towards player.");
+                        _collidedNpcPed.Task.ClearAll(); 
+                        Script.Wait(100); // Small delay to ensure task clear
+                        
+                        // Empêcher le NPC de remonter dans le véhicule
+                        _collidedNpcPed.BlockPermanentEvents = true;
+                        _collidedNpcPed.CanRagdoll = true;
+                        
+                        // Marquer le véhicule comme plus nécessaire pour éviter que le NPC y retourne
+                        if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists()) {
+                            _collidedNpcVehicle.MarkAsNoLongerNeeded();
+                        }
+                        
+                        _collidedNpcPed.Task.Combat(Game.Player.Character);
+                        Log($"NPC {_collidedNpcPed.Handle} set to combat mode against player.");
+                        ResetNpcReactionState(); 
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Error during aggressive NPC reaction: {ex.Message}");
+                        ResetNpcReactionState();
+                    }
+                    break;
+                    
+                case NpcReactionType.CallPolice:
+                    try
+                    {
+                        // Check if we haven't called police yet
+                        if (!PoliceCalled) 
+                        {
+                            Log($"NPC {_collidedNpcPed.Handle} is calling the police!");
+                            
+                            // Make NPC look scared and call police
+                            _collidedNpcPed.Task.ClearAll();
+                            Script.Wait(100);
+                            
+                            // Empêcher le NPC de partir ou de remonter dans le véhicule
+                            _collidedNpcPed.BlockPermanentEvents = true;
+                            
+                            // Marquer le véhicule comme plus nécessaire pour éviter que le NPC y retourne
+                            if (_collidedNpcVehicle != null && _collidedNpcVehicle.Exists()) {
+                                _collidedNpcVehicle.MarkAsNoLongerNeeded();
+                            }
+                            
+                            // Use hands up animation and make NPC stay at location
+                            _collidedNpcPed.Task.HandsUp(5000); // Hands up for 5 seconds
+                            
+                            // Set police called flag
+                            PoliceCalled = true; 
+                            _stateTimer = DateTime.Now; 
+                            Log($"PoliceCalled flag set to true by NPC {_collidedNpcPed.Handle}. Incident at: {_incidentLocation}");
+                            GTA.UI.Notification.PostTicker("An NPC is calling the police!", false, false);
+                            
+                            // Don't reset - keep the NPC around for police interaction
+                            _npcReacting = false; // Stop the reaction loop but keep the NPC alive
+                        }
+                        else
+                        {
+                            // Police already called, make NPC wait nearby and NOT flee
+                            // Force NPC to stay at incident location permanently
+                            _collidedNpcPed.BlockPermanentEvents = true;
+                            
+                            float npcDistanceToIncident = _collidedNpcPed.Position.DistanceTo(_incidentLocation);
+                            if (npcDistanceToIncident > 8f)
+                            {
+                                _collidedNpcPed.Task.ClearAll();
+                                Script.Wait(50);
+                                _collidedNpcPed.Task.FollowNavMeshTo(_incidentLocation);
+                                Log($"NPC {_collidedNpcPed.Handle} too far from incident, bringing back to scene.");
+                            }
+                            else
+                            {
+                                // S'assurer que le NPC reste sur place et ne fuit pas
+                                // Utiliser GuardCurrentPosition pour qu'il reste vraiment sur place
+                                if (!_collidedNpcPed.IsWalking && !_collidedNpcPed.IsRunning) {
+                                    _collidedNpcPed.Task.ClearAll();
+                                    Script.Wait(50);
+                                    _collidedNpcPed.Task.GuardCurrentPosition();
+                                    Log($"NPC {_collidedNpcPed.Handle} set to guard current position.");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Error during police calling NPC reaction: {ex.Message}");
+                        // Don't reset completely, just stop reacting and let the state be handled elsewhere
+                        _npcReacting = false;
+                    }
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"General error in ProcessNpcReaction: {ex.Message}");
+            ResetNpcReactionState();
         }
     }
 
@@ -1182,38 +1304,98 @@ public class NPCRoadRage : Script
     private void FullResetOfScriptStates() {
         Log("Performing full reset of script states.");
         
-        // S'assurer que les contrôles du joueur sont réactivés
-        if (_playerControlDisabled) {
-            Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
-            _playerControlDisabled = false;
-            Log("Player control re-enabled during full reset.");
+        try
+        {
+            // S'assurer que les contrôles du joueur sont réactivés
+            if (_playerControlDisabled) {
+                try
+                {
+                    Function.Call(Hash.ENABLE_ALL_CONTROL_ACTIONS, 0);
+                    _playerControlDisabled = false;
+                    Log("Player control re-enabled during full reset.");
+                }
+                catch (Exception ex)
+                {
+                    Log($"Error re-enabling player controls: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during player control cleanup: {ex.Message}");
         }
         
-        ResetNpcReactionState();
-        EndPoliceInteraction(false, false); 
-        _npcCollisionCooldowns.Clear(); 
-        _incidentLocation = Vector3.Zero;
-        _playerResponse = string.Empty;
-        _npcReacting = false;
-        _policeDispatched = false;
-        _policeArrived = false;
-        _policeInteractionActive = false;
-        _makingPoliceDecision = false;
-        PoliceCalled = false;
-        _showingResponseMenu = false;
-        _selectedResponseIndex = 0;
+        try
+        {
+            ResetNpcReactionState();
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during NPC reaction state reset: {ex.Message}");
+        }
         
-        // Réinitialiser les nouvelles variables d'état
-        _fineAlreadyGiven = false;
-        _decisionMessageShown = false;
+        try
+        {
+            EndPoliceInteraction(false, false); 
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during police interaction end: {ex.Message}");
+        }
         
-        // Nettoyer les dictionnaires de timing
-        _officerLastTaskedTime.Clear();
-        _lastOfficerTaskTime = DateTime.MinValue;
-        _lastMenuDisplayTime = DateTime.MinValue;
+        try
+        {
+            _npcCollisionCooldowns.Clear(); 
+            _incidentLocation = Vector3.Zero;
+            _playerResponse = string.Empty;
+            _npcReacting = false;
+            _policeDispatched = false;
+            _policeArrived = false;
+            _policeInteractionActive = false;
+            _makingPoliceDecision = false;
+            PoliceCalled = false;
+            _showingResponseMenu = false;
+            _selectedResponseIndex = 0;
+            
+            // Réinitialiser les nouvelles variables d'état
+            _fineAlreadyGiven = false;
+            _decisionMessageShown = false;
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during state variables reset: {ex.Message}");
+        }
         
-        ResetPoliceRedirectionStates();
-        ResetNavigationTracking(); // Add navigation tracking reset
+        try
+        {
+            // Nettoyer les dictionnaires de timing
+            _officerLastTaskedTime.Clear();
+            _lastOfficerTaskTime = DateTime.MinValue;
+            _lastMenuDisplayTime = DateTime.MinValue;
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during timing variables cleanup: {ex.Message}");
+        }
+        
+        try
+        {
+            ResetPoliceRedirectionStates();
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during police redirection reset: {ex.Message}");
+        }
+        
+        try
+        {
+            ResetNavigationTracking(); // Add navigation tracking reset
+        }
+        catch (Exception ex)
+        {
+            Log($"Error during navigation tracking reset: {ex.Message}");
+        }
+        
         Log("Full reset complete.");
     }
    
