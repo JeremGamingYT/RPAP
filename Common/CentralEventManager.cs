@@ -113,19 +113,57 @@ namespace REALIS.Common
 
         #region Vehicle Management
 
-        public bool TryLockVehicle(int vehicleHandle, string requesterId)
+        private const int LOCK_COOLDOWN_MS = 250;
+
+        public bool TryLockVehicle(int vehicleHandle, string requesterId, int priority = 0)
         {
-            if (_lockedVehicles.Contains(vehicleHandle)) return false;
-            
+            var state = GetVehicleState(vehicleHandle);
+
+            if (_lockedVehicles.Contains(vehicleHandle))
+            {
+                if (state.LockPriority > priority && state.LockedBy != requesterId)
+                {
+                    Logger.Info($"Lock denied on {vehicleHandle} for {requesterId}; locked by {state.LockedBy} (p{state.LockPriority})");
+                    return false;
+                }
+
+                if (state.LockedBy == requesterId)
+                {
+                    state.LastLockTime = DateTime.Now;
+                    return true; // déjà verrouillé par ce script
+                }
+
+                Logger.Info($"Lock override on {vehicleHandle}: {state.LockedBy} -> {requesterId} (p{priority})");
+                state.LockedBy = requesterId;
+                state.LockPriority = priority;
+                state.LastLockTime = DateTime.Now;
+                return true;
+            }
+
+            if ((DateTime.Now - state.LastLockTime).TotalMilliseconds < LOCK_COOLDOWN_MS)
+            {
+                Logger.Info($"Lock cooldown on {vehicleHandle} for {requesterId}");
+                return false;
+            }
+
             _lockedVehicles.Add(vehicleHandle);
-            UpdateVehicleState(vehicleHandle, vs => vs.LockedBy = requesterId);
+            state.LockedBy = requesterId;
+            state.LockPriority = priority;
+            state.LastLockTime = DateTime.Now;
+            Logger.Info($"Vehicle {vehicleHandle} locked by {requesterId} (p{priority})");
             return true;
         }
 
         public void UnlockVehicle(int vehicleHandle)
         {
             _lockedVehicles.Remove(vehicleHandle);
-            UpdateVehicleState(vehicleHandle, vs => vs.LockedBy = null);
+            UpdateVehicleState(vehicleHandle, vs =>
+            {
+                Logger.Info($"Vehicle {vehicleHandle} unlocked from {vs.LockedBy}");
+                vs.LockedBy = null;
+                vs.LockPriority = 0;
+                vs.LastLockTime = DateTime.Now;
+            });
         }
 
         public bool IsVehicleLocked(int vehicleHandle) => _lockedVehicles.Contains(vehicleHandle);
@@ -233,6 +271,7 @@ namespace REALIS.Common
         {
             try
             {
+                Logger.Error(message);
                 GTA.UI.Notification.PostTicker($"~r~[REALIS] {message}", false);
             }
             catch
@@ -272,6 +311,8 @@ namespace REALIS.Common
         public float Speed { get; set; }
         public bool IsStuck { get; set; }
         public string? LockedBy { get; set; }
+        public int LockPriority { get; set; }
+        public DateTime LastLockTime { get; set; } = DateTime.MinValue;
         public DateTime LastUpdate { get; set; } = DateTime.Now;
         public Dictionary<string, object> CustomData { get; } = new();
     }

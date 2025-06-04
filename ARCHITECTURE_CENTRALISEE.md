@@ -29,6 +29,8 @@ L'ancienne architecture décentralisée causait plusieurs problèmes critiques :
 **Responsabilités :**
 - Coordination de tous les modules
 - Gestion des verrous sur les véhicules
+- Système de verrous avec priorité (TrafficAI prioritaire)
+- Cooldown de 250 ms entre deux verrous pour éviter le spam
 - Distribution des événements
 - Nettoyage automatique des ressources
 
@@ -37,6 +39,7 @@ L'ancienne architecture décentralisée causait plusieurs problèmes critiques :
 - Prévention des conflits
 - Performance optimisée
 - Récupération d'erreurs
+- Journalisation détaillée des conflits et erreurs (`REALIS.log`)
 
 ### 2. Gestionnaire de Trafic Centralisé (`CentralizedTrafficManager`)
 

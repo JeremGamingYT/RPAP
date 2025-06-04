@@ -65,7 +65,7 @@ namespace REALIS.Common
                 var centralManager = CentralEventManager.Instance;
                 if (centralManager != null)
                 {
-                    return centralManager.TryLockVehicle(veh.Handle, "VehicleQueryService");
+                    return centralManager.TryLockVehicle(veh.Handle, "VehicleQueryService", 0);
                 }
 
                 // Fallback vers l'ancien système de verrous local (rétrocompatibilité)
@@ -164,6 +164,7 @@ namespace REALIS.Common
         {
             try
             {
+                Logger.Error(message);
                 // Évite les logs répétitifs en limitant la fréquence
                 GTA.UI.Notification.PostTicker($"~o~[VehicleQuery] {message}", false);
             }

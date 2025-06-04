@@ -15,6 +15,7 @@ namespace REALIS.Common
         public ScriptCoordinator()
         {
             GTA.UI.Notification.PostTicker("~g~[REALIS] Démarrage de l'architecture centralisée...", false);
+            AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
             
             try
             {
@@ -113,6 +114,7 @@ namespace REALIS.Common
         {
             try
             {
+                Logger.Error(message);
                 GTA.UI.Notification.PostTicker($"~r~[REALIS Coordinator] {message}", false);
             }
             catch
@@ -121,10 +123,30 @@ namespace REALIS.Common
             }
         }
 
+        private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                if (e.ExceptionObject is Exception ex)
+                {
+                    Logger.Error($"Unhandled exception: {ex}");
+                }
+                else
+                {
+                    Logger.Error($"Unhandled exception: {e.ExceptionObject}");
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         public void Dispose()
         {
             try
             {
+                AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
                 GTA.UI.Notification.PostTicker("~y~[REALIS] Arrêt de l'architecture centralisée...", false);
                 
                 // Nettoyage minimal - les scripts se nettoient automatiquement
