@@ -1,5 +1,10 @@
 # NPCRoadRage Script - Changelog
 
+## Version 1.27.2 - NPCIntelligence Build Cleanup (2025-06-04)
+
+### ✅ Compilation
+- Suppression de la variable inutile `playerShooting` qui provoquait une erreur de compilation
+
 ## Version 1.27.1 - NPCIntelligence Build Fix (2025-06-03)
 
 ### 🛠️ Correction de build
