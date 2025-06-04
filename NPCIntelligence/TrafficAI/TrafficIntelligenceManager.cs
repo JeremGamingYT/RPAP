@@ -20,7 +20,7 @@ namespace REALIS.TrafficAI
         private const float CheckRadius = 60f;
         private const float SpeedThreshold = 0.5f; // vitesse minimale pour considérer le véhicule arrêté
         private const float HonkDelay = 3f;        // temps avant klaxon
-        private const float BypassDelay = 8f;      // temps avant tentative de dépassement
+        private const float BypassDelay = 6f;      // tentative de dépassement plus rapide
 
         public TrafficIntelligenceManager()
         {
@@ -84,6 +84,7 @@ namespace REALIS.TrafficAI
 
             if (info.BlockedTime > BypassDelay)
             {
+                YieldNearbyTraffic(veh);
                 AttemptBypass(driver, veh);
                 info.BlockedTime = 0f;
                 info.Honked = false;
@@ -100,17 +101,51 @@ namespace REALIS.TrafficAI
 
         private void AttemptBypass(Ped driver, Vehicle veh)
         {
-            Vector3 right = veh.Position + veh.RightVector * 4f + veh.ForwardVector * 6f;
-            Vector3 left = veh.Position - veh.RightVector * 4f + veh.ForwardVector * 6f;
+            float forwardOffset = 8f;
+            float sideOffset = 4f;
 
-            Vector3 target = IsPathClear(right) ? right : left;
-            Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, driver, veh, target.X, target.Y, target.Z, 12f, 786603, 5f);
+            Vector3 forward = veh.Position + veh.ForwardVector * forwardOffset;
+            Vector3 rightTarget = forward + veh.RightVector * sideOffset;
+            Vector3 leftTarget = forward - veh.RightVector * sideOffset;
+
+            Vector3? target = null;
+            if (IsRouteClear(veh.Position, rightTarget, veh))
+                target = rightTarget;
+            else if (IsRouteClear(veh.Position, leftTarget, veh))
+                target = leftTarget;
+
+            if (target.HasValue)
+            {
+                Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, driver, veh,
+                    target.Value.X, target.Value.Y, target.Value.Z, 12f, 786603, 7f);
+            }
         }
 
-        private bool IsPathClear(Vector3 position)
+        private bool IsRouteClear(Vector3 start, Vector3 end, Vehicle ignore)
         {
-            var hit = World.Raycast(position + Vector3.WorldUp * 2f, position, IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles);
-            return !hit.DidHit;
+            var test = ShapeTest.StartTestCapsule(
+                start + Vector3.WorldUp,
+                end + Vector3.WorldUp,
+                2f,
+                IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds,
+                ignore);
+            var (_, res) = test.GetResult();
+            return !res.DidHit;
+        }
+
+        private void YieldNearbyTraffic(Vehicle blockedVeh)
+        {
+            var nearby = World.GetNearbyVehicles(blockedVeh.Position, 10f);
+            foreach (var other in nearby)
+            {
+                if (other == blockedVeh || other.Driver == null || !other.Driver.IsAlive)
+                    continue;
+
+                if (other.Speed > 0.1f && other.Position.DistanceTo(blockedVeh.Position) < 6f)
+                {
+                    Function.Call(Hash.TASK_VEHICLE_TEMP_ACTION, other.Driver, other, 27, 1500);
+                }
+            }
         }
     }
 }
