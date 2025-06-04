@@ -120,8 +120,12 @@ namespace REALIS.Common
             if (_lockedVehicles.Contains(vehicleHandle))
             {
                 if (state.LockPriority > priority)
+                {
+                    Logger.Info($"Lock denied on {vehicleHandle} for {requesterId}; locked by {state.LockedBy} (p{state.LockPriority})");
                     return false;
+                }
 
+                Logger.Info($"Lock override on {vehicleHandle}: {state.LockedBy} -> {requesterId} (p{priority})");
                 state.LockedBy = requesterId;
                 state.LockPriority = priority;
                 return true;
@@ -130,6 +134,7 @@ namespace REALIS.Common
             _lockedVehicles.Add(vehicleHandle);
             state.LockedBy = requesterId;
             state.LockPriority = priority;
+            Logger.Info($"Vehicle {vehicleHandle} locked by {requesterId} (p{priority})");
             return true;
         }
 
@@ -138,6 +143,7 @@ namespace REALIS.Common
             _lockedVehicles.Remove(vehicleHandle);
             UpdateVehicleState(vehicleHandle, vs =>
             {
+                Logger.Info($"Vehicle {vehicleHandle} unlocked from {vs.LockedBy}");
                 vs.LockedBy = null;
                 vs.LockPriority = 0;
             });
@@ -248,6 +254,7 @@ namespace REALIS.Common
         {
             try
             {
+                Logger.Error(message);
                 GTA.UI.Notification.PostTicker($"~r~[REALIS] {message}", false);
             }
             catch

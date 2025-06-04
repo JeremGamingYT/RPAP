@@ -38,6 +38,7 @@ L'ancienne architecture décentralisée causait plusieurs problèmes critiques :
 - Prévention des conflits
 - Performance optimisée
 - Récupération d'erreurs
+- Journalisation détaillée des conflits et erreurs (`REALIS.log`)
 
 ### 2. Gestionnaire de Trafic Centralisé (`CentralizedTrafficManager`)
 

@@ -164,6 +164,7 @@ namespace REALIS.Common
         {
             try
             {
+                Logger.Error(message);
                 // Évite les logs répétitifs en limitant la fréquence
                 GTA.UI.Notification.PostTicker($"~o~[VehicleQuery] {message}", false);
             }
