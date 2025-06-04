@@ -336,8 +336,8 @@ namespace REALIS.UrbanLife
                 policeCar.IsPersistent = true;
                 
                 // Sortir les personnages des véhicules
-                civilDriver.Task.LeaveVehicle();
-                officer.Task.LeaveVehicle();
+                ExecuteVehicleAction(civilCar, () => civilDriver.Task.LeaveVehicle());
+                ExecuteVehicleAction(policeCar, () => officer.Task.LeaveVehicle());
                 
                 // Créer l'événement
                 var roadEvent = new RoadEvent
@@ -396,8 +396,8 @@ namespace REALIS.UrbanLife
                 car2.IsPersistent = true;
                 
                 // Les faire sortir et discuter
-                driver1.Task.LeaveVehicle();
-                driver2.Task.LeaveVehicle();
+                ExecuteVehicleAction(car1, () => driver1.Task.LeaveVehicle());
+                ExecuteVehicleAction(car2, () => driver2.Task.LeaveVehicle());
                 
                 var roadEvent = new RoadEvent
                 {
@@ -520,7 +520,7 @@ namespace REALIS.UrbanLife
                 brokenCar.IsPersistent = true;
                 
                 // Le faire sortir et regarder le moteur
-                driver.Task.LeaveVehicle();
+                ExecuteVehicleAction(brokenCar, () => driver.Task.LeaveVehicle());
                 
                 var roadEvent = new RoadEvent
                 {
@@ -564,7 +564,7 @@ namespace REALIS.UrbanLife
                 // Le patient est au sol
                 Function.Call(Hash.TASK_PLAY_ANIM, patient, "amb@medic@standing@kneel@base", "base", 8.0f, -1, 1, 0.0f, 0);
                 
-                paramedic1.Task.LeaveVehicle();
+                ExecuteVehicleAction(ambulance, () => paramedic1.Task.LeaveVehicle());
                 
                 var roadEvent = new RoadEvent
                 {
@@ -806,7 +806,11 @@ namespace REALIS.UrbanLife
                             if (distance <= 20.0f) // Arrivée proche
                             {
                                 // Arrêter la dépanneuse
-                                towDriver?.Task.LeaveVehicle();
+                                if (towDriver != null)
+                                {
+                                    ExecuteVehicleAction(roadEvent.TowTruck, () =>
+                                        towDriver.Task.LeaveVehicle());
+                                }
                                 
                                 // Changer le blip pour indiquer l'arrivée
                                 if (roadEvent.Blip?.Exists() == true)
@@ -848,7 +852,8 @@ namespace REALIS.UrbanLife
                         if (roadEvent.TowTruck?.Exists() == true && driver?.Exists() == true)
                         {
                             // Le conducteur accidenté monte en tant que passager
-                            driver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Passenger);
+                            ExecuteVehicleAction(roadEvent.TowTruck, () =>
+                                driver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Passenger));
                             
                             GTA.UI.Notification.PostTicker("~g~Le conducteur accidenté monte dans la dépanneuse...", false);
                             GTA.UI.Screen.ShowSubtitle("~b~Le véhicule va être chargé sur la dépanneuse...", 4000);
@@ -946,13 +951,18 @@ namespace REALIS.UrbanLife
                                 if (driver?.Exists() == true && !driver.IsInVehicle())
                                 {
                                     driver.Task.ClearAllImmediately();
-                                    driver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Passenger);
+                                    ExecuteVehicleAction(roadEvent.TowTruck, () =>
+                                        driver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Passenger));
                                 }
                             }
                             else if (!towDriverReady)
                             {
                                 // Le dépanneur n'est pas encore dans son véhicule
-                                towDriver?.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Driver);
+                                if (towDriver != null)
+                                {
+                                    ExecuteVehicleAction(roadEvent.TowTruck, () =>
+                                        towDriver.Task.EnterVehicle(roadEvent.TowTruck, VehicleSeat.Driver));
+                                }
                             }
                         }
                         
@@ -988,7 +998,7 @@ namespace REALIS.UrbanLife
                     {
                         if (driver?.Exists() == true && driver.IsInVehicle())
                         {
-                            driver.Task.LeaveVehicle();
+                            ExecuteVehicleAction(driver.CurrentVehicle, () => driver.Task.LeaveVehicle());
                             GTA.UI.Notification.PostTicker("~g~Le passager vous remercie et descend!", false);
                         }
                         roadEvent.Phase = 95; // Marqué pour suppression
@@ -1366,7 +1376,7 @@ namespace REALIS.UrbanLife
                                     // CORRECTION: Sécuriser la sortie du véhicule
                                     driver.Task.ClearAllImmediately();
                                     Script.Wait(100);
-                                    driver.Task.LeaveVehicle();
+                                    ExecuteVehicleAction(driver.CurrentVehicle, () => driver.Task.LeaveVehicle());
                                     
                                     GTA.UI.Notification.PostTicker($"~g~\"Merci beaucoup ! Je suis arrivé à {roadEvent.PassengerDestination?.Name}.\"", false);
                                     GTA.UI.Screen.ShowSubtitle("~g~Mission accomplie ! Le passager est arrivé à destination.", 4000);
@@ -1404,7 +1414,7 @@ namespace REALIS.UrbanLife
                                 {
                                     driver.Task.ClearAllImmediately();
                                     Script.Wait(100);
-                                    driver.Task.LeaveVehicle();
+                                    ExecuteVehicleAction(driver.CurrentVehicle, () => driver.Task.LeaveVehicle());
                                     GTA.UI.Notification.PostTicker("~y~\"Je vais descendre ici, merci quand même !\"", false);
                                 }
                                 catch { }
@@ -1422,7 +1432,7 @@ namespace REALIS.UrbanLife
                                 GTA.UI.Notification.PostTicker("~y~Le passager vous suit vers votre véhicule...", false);
                                 driver.Task.ClearAllImmediately();
                                 Script.Wait(50);
-                                driver.Task.LeaveVehicle();
+                                ExecuteVehicleAction(driverVehicle, () => driver.Task.LeaveVehicle());
                                 roadEvent.Phase = 82; // Retour à la phase de suivi
                                 roadEvent.RepairStartTime = DateTime.Now;
                             }
