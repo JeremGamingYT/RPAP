@@ -584,8 +584,11 @@ namespace REALIS.UrbanLife
             blip.IsShortRange = false;
             blip.IsFlashing = true;
             
-            if (roadEvent.Type == RoadEventType.TrafficAccident || roadEvent.Type == RoadEventType.Paramedics)
+            if (roadEvent.Type == RoadEventType.TrafficAccident
+                || roadEvent.Type == RoadEventType.Paramedics
+                || roadEvent.Type == RoadEventType.BrokenDownVehicle)
             {
+                // Afficher l'itinéraire violet comme pour un point GPS normal
                 blip.ShowRoute = true;
             }
             
@@ -2586,6 +2589,8 @@ namespace REALIS.UrbanLife
                         destinationBlip.Color = BlipColor.Yellow;
                         destinationBlip.Scale = 1.0f;
                         destinationBlip.Name = randomDestination.Name;
+                        // Afficher un tracé GPS pour guider le joueur
+                        destinationBlip.ShowRoute = true;
                         
                         // Remplacer le blip de l'événement par la destination
                         breakdownEvent.Blip?.Delete();
