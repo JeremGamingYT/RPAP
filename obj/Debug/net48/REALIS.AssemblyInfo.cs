@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("REALIS")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+602ff3b710f0800fcad3e157685c10e6c33b2580")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+688bf7b93070ce1c07d7015a9940fa85af152275")]
 [assembly: System.Reflection.AssemblyProductAttribute("REALIS")]
 [assembly: System.Reflection.AssemblyTitleAttribute("REALIS")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
