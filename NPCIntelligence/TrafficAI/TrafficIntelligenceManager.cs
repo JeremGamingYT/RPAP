@@ -123,10 +123,14 @@ namespace REALIS.TrafficAI
 
         private bool IsRouteClear(Vector3 start, Vector3 end, Vehicle ignore)
         {
-            var hit = World.RaycastCapsule(start + Vector3.WorldUp, end + Vector3.WorldUp, 2f,
+            var test = ShapeTest.StartTestCapsule(
+                start + Vector3.WorldUp,
+                end + Vector3.WorldUp,
+                2f,
                 IntersectFlags.Map | IntersectFlags.Objects | IntersectFlags.Vehicles | IntersectFlags.Peds,
                 ignore);
-            return !hit.DidHit;
+            var result = test.GetResult();
+            return !result.DidHit;
         }
 
         private void YieldNearbyTraffic(Vehicle blockedVeh)
