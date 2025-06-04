@@ -29,6 +29,7 @@ L'ancienne architecture décentralisée causait plusieurs problèmes critiques :
 **Responsabilités :**
 - Coordination de tous les modules
 - Gestion des verrous sur les véhicules
+- Système de verrous avec priorité (TrafficAI prioritaire)
 - Distribution des événements
 - Nettoyage automatique des ressources
 

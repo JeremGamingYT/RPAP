@@ -113,19 +113,34 @@ namespace REALIS.Common
 
         #region Vehicle Management
 
-        public bool TryLockVehicle(int vehicleHandle, string requesterId)
+        public bool TryLockVehicle(int vehicleHandle, string requesterId, int priority = 0)
         {
-            if (_lockedVehicles.Contains(vehicleHandle)) return false;
-            
+            var state = GetVehicleState(vehicleHandle);
+
+            if (_lockedVehicles.Contains(vehicleHandle))
+            {
+                if (state.LockPriority > priority)
+                    return false;
+
+                state.LockedBy = requesterId;
+                state.LockPriority = priority;
+                return true;
+            }
+
             _lockedVehicles.Add(vehicleHandle);
-            UpdateVehicleState(vehicleHandle, vs => vs.LockedBy = requesterId);
+            state.LockedBy = requesterId;
+            state.LockPriority = priority;
             return true;
         }
 
         public void UnlockVehicle(int vehicleHandle)
         {
             _lockedVehicles.Remove(vehicleHandle);
-            UpdateVehicleState(vehicleHandle, vs => vs.LockedBy = null);
+            UpdateVehicleState(vehicleHandle, vs =>
+            {
+                vs.LockedBy = null;
+                vs.LockPriority = 0;
+            });
         }
 
         public bool IsVehicleLocked(int vehicleHandle) => _lockedVehicles.Contains(vehicleHandle);
@@ -272,6 +287,7 @@ namespace REALIS.Common
         public float Speed { get; set; }
         public bool IsStuck { get; set; }
         public string? LockedBy { get; set; }
+        public int LockPriority { get; set; }
         public DateTime LastUpdate { get; set; } = DateTime.Now;
         public Dictionary<string, object> CustomData { get; } = new();
     }

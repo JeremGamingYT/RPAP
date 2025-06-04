@@ -9,3 +9,4 @@ Ce dépôt contient divers scripts pour GTA V.
 * L'intégration `NPCRoadRage` est maintenant désactivée afin d'éviter les plantages quand on croise d'autres véhicules.
 * TrafficAI gère mieux les obstacles et évite les crashs liés aux embouteillages massifs.
 * L'intégration `NPCRoadRage` est maintenant désactivée afin d'éviter les plantages quand on croise d'autres véhicules.
+* Système de verrous prioritaire : `TrafficAI` prend toujours la main sur les véhicules.

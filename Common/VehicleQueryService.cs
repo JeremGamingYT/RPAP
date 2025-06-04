@@ -65,7 +65,7 @@ namespace REALIS.Common
                 var centralManager = CentralEventManager.Instance;
                 if (centralManager != null)
                 {
-                    return centralManager.TryLockVehicle(veh.Handle, "VehicleQueryService");
+                    return centralManager.TryLockVehicle(veh.Handle, "VehicleQueryService", 0);
                 }
 
                 // Fallback vers l'ancien système de verrous local (rétrocompatibilité)
