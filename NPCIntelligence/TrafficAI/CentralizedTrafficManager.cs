@@ -15,6 +15,7 @@ namespace REALIS.TrafficAI
     public class CentralizedTrafficManager : Script, IEventHandler
     {
         private readonly string MANAGER_ID = "CentralizedTrafficManager";
+        private const int LOCK_PRIORITY = 10;
         private readonly Dictionary<int, TrafficVehicleInfo> _trackedVehicles = new();
         private readonly Dictionary<int, DateTime> _lastProcessTime = new();
         
@@ -633,7 +634,7 @@ namespace REALIS.TrafficAI
             if (CentralEventManager.Instance == null)
                 return false;
                 
-            if (!CentralEventManager.Instance.TryLockVehicle(vehicle.Handle, MANAGER_ID))
+            if (!CentralEventManager.Instance.TryLockVehicle(vehicle.Handle, MANAGER_ID, LOCK_PRIORITY))
                 return false;
 
             _lastProcessTime[vehicle.Handle] = DateTime.Now;

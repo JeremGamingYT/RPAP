@@ -16,6 +16,7 @@ namespace REALIS.UrbanLife
     public class CentralizedIncidentManager : Script, IEventHandler
     {
         private readonly string MANAGER_ID = "CentralizedIncidentManager";
+        private const int LOCK_PRIORITY = 5;
         
         // État des incidents actifs
         private readonly Dictionary<int, ActiveIncident> _activeIncidents = new();
@@ -229,7 +230,7 @@ namespace REALIS.UrbanLife
                     return;
 
                 // Vérifie si on peut acquérir le contrôle du véhicule
-                if (!CentralEventManager.Instance.TryLockVehicle(collisionInfo.OtherVehicle.Handle, MANAGER_ID))
+                if (!CentralEventManager.Instance.TryLockVehicle(collisionInfo.OtherVehicle.Handle, MANAGER_ID, LOCK_PRIORITY))
                     return;
 
                 // Marque comme traité
