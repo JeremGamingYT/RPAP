@@ -1,0 +1,47 @@
+--- Logging started 2025-06-04 14:34:37Z ---
+2025-06-04 14:34:37Z [INFO] Vehicle 277762 locked by VehicleQueryService (p0)
+2025-06-04 14:34:37Z [INFO] Vehicle 277762 unlocked from VehicleQueryService
+2025-06-04 14:34:38Z [INFO] Vehicle 145154 locked by VehicleQueryService (p0)
+2025-06-04 14:34:38Z [INFO] Vehicle 145154 unlocked from VehicleQueryService
+2025-06-04 14:34:40Z [INFO] Vehicle 145154 locked by VehicleQueryService (p0)
+2025-06-04 14:34:40Z [INFO] Vehicle 145154 unlocked from VehicleQueryService
+2025-06-04 14:34:44Z [INFO] Vehicle 145154 locked by VehicleQueryService (p0)
+2025-06-04 14:34:44Z [INFO] Vehicle 145154 unlocked from VehicleQueryService
+2025-06-04 14:34:46Z [INFO] Vehicle 145154 locked by VehicleQueryService (p0)
+2025-06-04 14:34:46Z [INFO] Vehicle 145154 unlocked from VehicleQueryService
+2025-06-04 14:34:49Z [INFO] Vehicle 145154 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:34:49Z [INFO] Vehicle 145154 unlocked from CentralizedTrafficManager
+2025-06-04 14:34:49Z [INFO] Vehicle 145154 locked by VehicleQueryService (p0)
+2025-06-04 14:34:49Z [INFO] Vehicle 145154 unlocked from VehicleQueryService
+2025-06-04 14:35:01Z [INFO] Vehicle 145154 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:01Z [INFO] Vehicle 145154 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:27Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:27Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:28Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:28Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:30Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:30Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:31Z [INFO] Vehicle 511490 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:31Z [INFO] Vehicle 511490 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:31Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:31Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:43Z [INFO] Vehicle 511490 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:43Z [INFO] Vehicle 511490 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:43Z [INFO] Vehicle 365058 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:43Z [INFO] Vehicle 365058 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:43Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:43Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:49Z [INFO] Vehicle 511490 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:49Z [INFO] Vehicle 511490 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:49Z [INFO] Vehicle 682498 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:49Z [INFO] Vehicle 682498 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:49Z [INFO] Vehicle 651010 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:35:49Z [INFO] Vehicle 651010 unlocked from CentralizedTrafficManager
+2025-06-04 14:35:49Z [INFO] Vehicle 511490 locked by VehicleQueryService (p0)
+2025-06-04 14:35:49Z [INFO] Vehicle 511490 unlocked from VehicleQueryService
+2025-06-04 14:35:49Z [INFO] Vehicle 651010 locked by VehicleQueryService (p0)
+2025-06-04 14:35:49Z [INFO] Vehicle 651010 unlocked from VehicleQueryService
+2025-06-04 14:36:01Z [INFO] Vehicle 651010 locked by CentralizedTrafficManager (p10)
+2025-06-04 14:36:01Z [INFO] Vehicle 651010 unlocked from CentralizedTrafficManager
+2025-06-04 14:36:01Z [INFO] Vehicle 651010 locked by VehicleQueryService (p0)
+2025-06-04 14:36:01Z [INFO] Vehicle 651010 unlocked from VehicleQueryService

@@ -19,15 +19,15 @@ namespace REALIS.TrafficAI
         private readonly Dictionary<int, TrafficVehicleInfo> _trackedVehicles = new();
         private readonly Dictionary<int, DateTime> _lastProcessTime = new();
         
-        // Configuration optimisée
-        private const float SCAN_RADIUS = 35f;
-        private const float PROCESSING_INTERVAL = 2f; // secondes
+        // Configuration ultra-conservative pour éviter les crashes
+        private const float SCAN_RADIUS = 25f; // RÉDUIT: Zone de scan plus petite
+        private const float PROCESSING_INTERVAL = 10f; // AUGMENTÉ: Traitement moins fréquent
         private const float SPEED_THRESHOLD = 1.2f;
-        private const float BLOCKED_TIME_THRESHOLD = 4f;
-        private const float HONK_COOLDOWN = 8f;
-        private const float BYPASS_COOLDOWN = 12f;
-        private const int MAX_CONCURRENT_PROCESSING = 6;
-        private const float PLAYER_SAFE_ZONE = 6f;
+        private const float BLOCKED_TIME_THRESHOLD = 8f; // AUGMENTÉ: Plus patient
+        private const float HONK_COOLDOWN = 15f; // AUGMENTÉ: Moins de klaxon
+        private const float BYPASS_COOLDOWN = 20f; // AUGMENTÉ: Évite les manœuvres excessives
+        private const int MAX_CONCURRENT_PROCESSING = 3; // RÉDUIT: Moins de véhicules traités simultanément
+        private const float PLAYER_SAFE_ZONE = 10f; // AUGMENTÉ: Zone de sécurité plus large
         
         private DateTime _lastFullScan = DateTime.MinValue;
         private int _processedThisTick = 0;
@@ -37,13 +37,16 @@ namespace REALIS.TrafficAI
         public CentralizedTrafficManager()
         {
             Tick += OnTick;
-            Interval = 1000; // 1 seconde - plus conservateur
+            Interval = 8000; // AUGMENTÉ: 8 secondes - ultra-conservateur pour éviter le spam et les crashes
         }
 
         private void OnTick(object sender, EventArgs e)
         {
             try
             {
+                // Applique le throttling pour éviter le spam
+                if (!MovementThrottler.CanProcessTraffic())
+                    return;
                 // Vérifie que le gestionnaire central est disponible
                 if (CentralEventManager.Instance == null)
                     return;
@@ -89,8 +92,11 @@ namespace REALIS.TrafficAI
             var playerVehicle = player.CurrentVehicle;
             if (playerVehicle.Speed < 0.3f) return false; // Joueur immobile
             
-            // Limite le traitement à intervalles réguliers
+            // Limite le traitement à intervalles réguliers - TRÈS RESTRICTIF
             if ((DateTime.Now - _lastFullScan).TotalSeconds < PROCESSING_INTERVAL) return false;
+            
+            // Protection supplémentaire : Ne traite que si le joueur roule depuis un moment
+            if (playerVehicle.Speed < 2f) return false; // Joueur doit rouler à vitesse minimale
             
             return true;
         }

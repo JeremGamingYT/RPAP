@@ -27,8 +27,13 @@ namespace REALIS.Common
         // Configuration
         private const float CLEANUP_INTERVAL = 15f; // secondes
         private const float MAX_EVENT_AGE = 30f; // secondes
-        private const int MAX_EVENTS_PER_TICK = 10;
+        private const int MAX_EVENTS_PER_TICK = 5; // RÉDUIT: Moins d'événements par tick
         private DateTime _lastCleanup = DateTime.Now;
+        
+        // Protection anti-spam
+        private readonly Dictionary<int, List<DateTime>> _lockSpamDetection = new();
+        private const int MAX_LOCKS_PER_VEHICLE_PER_MINUTE = 10; // Maximum 10 verrous par véhicule par minute
+        private bool _emergencyMode = false;
 
         // Constructeur public par défaut pour ScriptHookVDotNet
         public CentralEventManager()
@@ -116,6 +121,23 @@ namespace REALIS.Common
         private const int LOCK_COOLDOWN_MS = 250;
         public bool TryLockVehicle(int vehicleHandle, string requesterId, int priority = 0)
         {
+            // PROTECTION ANTI-SPAM - Vérifie si le véhicule fait l'objet de spam
+            if (IsVehicleSpamming(vehicleHandle))
+            {
+                if (!_emergencyMode)
+                {
+                    _emergencyMode = true;
+                    Logger.Error($"EMERGENCY MODE ACTIVATED - Vehicle {vehicleHandle} spam detected! Throttling all operations.");
+                }
+                return false;
+            }
+            
+            // Mode d'urgence : rejette toutes les tentatives de verrous
+            if (_emergencyMode)
+            {
+                return false;
+            }
+
             var state = GetVehicleState(vehicleHandle);
 
             if (_lockedVehicles.Contains(vehicleHandle))
@@ -153,12 +175,14 @@ namespace REALIS.Common
                 Logger.Info($"Lock override on {vehicleHandle}: {state.LockedBy} -> {requesterId} (p{priority})");
                 state.LockedBy = requesterId;
                 state.LockPriority = priority;
+                RecordLockAttempt(vehicleHandle);
                 return true;
             }
 
             _lockedVehicles.Add(vehicleHandle);
             state.LockedBy = requesterId;
             state.LockPriority = priority;
+            RecordLockAttempt(vehicleHandle);
             Logger.Info($"Vehicle {vehicleHandle} locked by {requesterId} (p{priority})");
             return true;
         }
@@ -226,6 +250,52 @@ namespace REALIS.Common
             {
                 _vehicleStates.Remove(handle);
                 _lockedVehicles.Remove(handle);
+            }
+        }
+
+        #endregion
+
+        #region Anti-Spam Protection
+
+        private void RecordLockAttempt(int vehicleHandle)
+        {
+            var now = DateTime.Now;
+            if (!_lockSpamDetection.TryGetValue(vehicleHandle, out var attempts))
+            {
+                attempts = new List<DateTime>();
+                _lockSpamDetection[vehicleHandle] = attempts;
+            }
+
+            attempts.Add(now);
+            
+            // Nettoie les tentatives anciennes (plus d'une minute)
+            attempts.RemoveAll(time => (now - time).TotalMinutes > 1);
+        }
+
+        private bool IsVehicleSpamming(int vehicleHandle)
+        {
+            if (!_lockSpamDetection.TryGetValue(vehicleHandle, out var attempts))
+                return false;
+
+            var now = DateTime.Now;
+            var recentAttempts = attempts.Count(time => (now - time).TotalMinutes <= 1);
+            
+            return recentAttempts >= MAX_LOCKS_PER_VEHICLE_PER_MINUTE;
+        }
+
+        private void ResetEmergencyMode()
+        {
+            if (_emergencyMode)
+            {
+                var now = DateTime.Now;
+                bool anySpamming = _lockSpamDetection.Values
+                    .Any(attempts => attempts.Count(time => (now - time).TotalMinutes <= 1) >= MAX_LOCKS_PER_VEHICLE_PER_MINUTE);
+
+                if (!anySpamming)
+                {
+                    _emergencyMode = false;
+                    Logger.Info("Emergency mode deactivated - spam resolved");
+                }
             }
         }
 

@@ -16,7 +16,7 @@ namespace REALIS.Common
         private static Vector3 _lastPosition = Vector3.Zero;
         private static float _lastRadius = 0f;
         private static DateTime _lastUpdate = DateTime.MinValue;
-        private const int CacheDurationMs = 500;
+        private const int CacheDurationMs = 2000; // Augmenté de 500ms à 2000ms pour réduire le spam
 
         /// <summary>
         /// Obtient les véhicules proches avec mise en cache pour optimiser les performances.
@@ -26,8 +26,17 @@ namespace REALIS.Common
         {
             try
             {
+                // Applique le throttling pour éviter le spam
+                if (!MovementThrottler.CanQueryNearbyVehicles())
+                {
+                    // Retourne le cache existant si disponible
+                    return _cached.Where(v => IsVehicleValid(v) && 
+                                             v.Position.DistanceToSquared(position) <= radius * radius)
+                                   .ToArray();
+                }
+
                 bool refresh = (DateTime.Now - _lastUpdate).TotalMilliseconds > CacheDurationMs
-                                 || position.DistanceToSquared(_lastPosition) > 4f
+                                 || position.DistanceToSquared(_lastPosition) > 25f // Augmenté de 4f à 25f
                                  || radius > _lastRadius;
 
                 if (refresh)
@@ -58,6 +67,10 @@ namespace REALIS.Common
         public static bool TryAcquireControl(Vehicle veh)
         {
             if (veh == null || !veh.Exists()) return false;
+
+            // Applique le throttling pour éviter le spam de verrous
+            if (!MovementThrottler.CanLockVehicle(veh.Handle))
+                return false;
 
             try
             {
